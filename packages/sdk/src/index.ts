@@ -4,6 +4,7 @@ import { render } from './display.js'
 const AD_SERVER_URL = process.env['MUSCAT_ADS_URL'] ?? 'https://api.muscat-ads.com/v1/impression'
 const SDK_VERSION = '0.1.0'
 const RATE_LIMIT_MS = 5000
+const FETCH_TIMEOUT_MS = 2000
 
 let lastShown = 0
 
@@ -35,7 +36,7 @@ export async function showAd(opts: ShowAdOptions): Promise<ShowAdResult> {
 
   try {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 500)
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
 
     let res: Response
     try {
