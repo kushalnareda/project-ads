@@ -1,0 +1,17 @@
+# Build output
+**/dist/
+**/node_modules/
+
+# AI tool data directories
+.agent/
+.agents/
+.aider/
+.architects/
+.claude/
+.cline/
+.continue/
+.cursor/
+.gstack/
+.serena/
+.synapse/
+.windsurfrules
