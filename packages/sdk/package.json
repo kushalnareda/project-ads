@@ -1,5 +1,5 @@
 {
-  "name": "@muscat/agent-ads",
+  "name": "@project-ads/agent-ads",
   "version": "0.1.0",
   "description": "Programmatic ad SDK for AI agent wait states",
   "license": "MIT",

@@ -1,5 +1,5 @@
 {
-  "name": "@muscat/ad-server",
+  "name": "@project-ads/ad-server",
   "version": "0.1.0",
   "private": true,
   "type": "module",

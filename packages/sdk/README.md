@@ -1,17 +1,17 @@
-# @muscat/agent-ads
+# @project-ads/agent-ads
 
 Programmatic ad SDK for AI agent wait states. Show one sponsored line when your tool hits a rate limit or long run — developer earns credits, you earn revenue.
 
 ## Install
 
 ```sh
-npm install @muscat/agent-ads
+npm install @project-ads/agent-ads
 ```
 
 ## Usage
 
 ```typescript
-import { showAd } from '@muscat/agent-ads'
+import { showAd } from '@project-ads/agent-ads'
 
 // Call once per wait state (rate limit, long run, spinner)
 const result = await showAd({ surface: 'rate-limit' })
@@ -22,10 +22,10 @@ const result = await showAd({ surface: 'rate-limit' })
 
 ## What it does
 
-- Fetches a sponsored message from `api.muscat-ads.com`
+- Fetches a sponsored message from `api.project-ads.com`
 - Prints `[ad] <text> → <url>` to stderr (TTY only)
-- Increments a local credit counter at `~/.muscat-ads/wallet.json`
-- Returns in ≤ 500ms (hard timeout)
+- Increments a local credit counter at `~/.project-ads/wallet.json`
+- Returns in ≤ 2s (hard timeout)
 
 ## Limits
 

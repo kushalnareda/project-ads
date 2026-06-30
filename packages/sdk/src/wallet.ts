@@ -2,7 +2,7 @@ import { homedir } from 'os'
 import { join } from 'path'
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'fs'
 
-const WALLET_DIR = join(homedir(), '.muscat-ads')
+const WALLET_DIR = join(homedir(), '.project-ads')
 const WALLET_PATH = join(WALLET_DIR, 'wallet.json')
 const WALLET_TMP = join(WALLET_DIR, 'wallet.tmp')
 
@@ -28,8 +28,8 @@ export function increment(delta: number): void {
     renameSync(WALLET_TMP, WALLET_PATH)
   } catch {
     // Swallow silently per spec — credits not redeemable at MVP
-    if (process.env['DEBUG']?.includes('muscat-ads')) {
-      process.stderr.write(`[muscat-ads] wallet write failed\n`)
+    if (process.env['DEBUG']?.includes('project-ads')) {
+      process.stderr.write(`[project-ads] wallet write failed\n`)
     }
   }
 }
