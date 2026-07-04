@@ -1,0 +1,43 @@
+name: Setup Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g. 0.1.0)'
+        required: true
+  push:
+    branches: [main]
+    paths: ['packages/setup/**']
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/setup
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Publish (manual trigger)
+        if: github.event_name == 'workflow_dispatch'
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish (semantic-release on push)
+        if: github.event_name == 'push'
+        run: npx semantic-release
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
