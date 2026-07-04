@@ -56,6 +56,7 @@ async function main() {
   console.log(`✓ ${SETTINGS}`)
 
   console.log('\nAll set. Earn credits on every Claude Code session.')
+  console.log(`\nYour dashboard: ${SERVER}/dashboard?token=${token}`)
 }
 
 function wireSettings() {
