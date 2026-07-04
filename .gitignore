@@ -2,6 +2,12 @@
 **/dist/
 **/node_modules/
 
+# Local secrets — never commit
+.env
+.env.local
+**/.env
+**/.env.local
+
 # AI tool data directories
 .agent/
 .agents/
