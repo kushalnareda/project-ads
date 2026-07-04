@@ -293,11 +293,15 @@ const DASHBOARD_HTML = `<!doctype html>
       <thead><tr><th>day</th><th class="r">impressions</th><th class="r">credits</th></tr></thead>
       <tbody id="days"></tbody>
     </table>
+    <div style="margin-top:16px;font-size:12px;color:#7d8590;text-align:right">
+      <a href="#" onclick="load(localStorage.getItem('pa_token'));return false" style="color:#58a6ff;margin-right:12px">refresh</a>
+      <a href="#" onclick="logout();return false" style="color:#7d8590">sign out</a>
+    </div>
   </div>
 </div>
 <script>
-async function load() {
-  const token = document.getElementById('token').value.trim()
+async function load(tokenArg) {
+  const token = (tokenArg ?? document.getElementById('token').value).trim()
   const err = document.getElementById('err')
   err.style.display = 'none'
   if (!token) return
@@ -305,6 +309,7 @@ async function load() {
     const res = await fetch('/v1/publisher/earnings', { headers: { authorization: 'Bearer ' + token } })
     if (!res.ok) throw new Error('HTTP ' + res.status)
     const d = await res.json()
+    localStorage.setItem('pa_token', token)
     document.getElementById('credits').textContent = (d.total_credits ?? 0).toFixed(4)
     document.getElementById('impressions').textContent = d.total_impressions ?? 0
     const days = Object.entries(d.daily ?? {}).sort((a, b) => b[0].localeCompare(a[0]))
@@ -314,10 +319,38 @@ async function load() {
     document.getElementById('login').style.display = 'none'
     document.getElementById('stats').style.display = 'block'
   } catch (e) {
+    localStorage.removeItem('pa_token')
     err.textContent = 'failed to load: ' + e.message
     err.style.display = 'block'
   }
 }
+function logout() {
+  localStorage.removeItem('pa_token')
+  history.replaceState(null, '', '/dashboard')
+  document.getElementById('stats').style.display = 'none'
+  document.getElementById('login').style.display = 'block'
+}
+// Try local token server (installed by npx @project-ads/setup, port 41042)
+async function tryLocalToken() {
+  try {
+    const r = await fetch('http://localhost:41042/token', { signal: AbortSignal.timeout(400) })
+    if (r.ok) { const d = await r.json(); return d.token || null }
+  } catch {}
+  return null
+}
+// Auto-login priority: ?token= URL param → localStorage → local token server
+async function autoLogin() {
+  const urlToken = new URLSearchParams(location.search).get('token')
+  if (urlToken) {
+    history.replaceState(null, '', '/dashboard')
+    return load(urlToken)
+  }
+  const stored = localStorage.getItem('pa_token')
+  if (stored) return load(stored)
+  const local = await tryLocalToken()
+  if (local) return load(local)
+}
+autoLogin()
 document.getElementById('token').addEventListener('keydown', e => { if (e.key === 'Enter') load() })
 </script>
 </body>
