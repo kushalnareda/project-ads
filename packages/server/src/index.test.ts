@@ -7,12 +7,14 @@ vi.mock('@aws-sdk/client-s3', () => {
     S3Client: vi.fn(() => ({ send })),
     PutObjectCommand: vi.fn(),
     GetObjectCommand: vi.fn(),
+    ListObjectsV2Command: vi.fn(),
     NoSuchKey: class NoSuchKey extends Error { name = 'NoSuchKey' },
     __send: send,
   }
 })
 
 // Required env vars before config loads
+vi.stubEnv('ADMIN_TOKEN', 'test-admin-token')
 vi.stubEnv('AD_TEXT', 'Ramp · save time on expenses')
 vi.stubEnv('AD_URL', 'https://ramp.com')
 vi.stubEnv('R2_ACCOUNT_ID', 'test-account')

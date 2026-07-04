@@ -1,0 +1,67 @@
+# project-ads
+
+**The ad network built for AI coding tools.**
+
+Ads appear in the Claude Code status line while AI generates output — the highest-attention moment in a developer's day. Zero banner blindness. Full attention.
+
+---
+
+## For advertisers
+
+Reach developers at the exact second they're waiting for AI output.
+
+- **Audience:** engineers actively using AI coding tools
+- **Format:** single sponsored line — no banners, no popups, no noise
+- **Pricing:** CPM-based, 30-day campaigns starting at $200
+- **Placement:** Claude Code status line and spinner (Codex + OpenCode coming)
+
+To advertise: email [kushalsinghnareda@gmail.com](mailto:kushalsinghnareda@gmail.com)
+
+---
+
+## For publishers (developers)
+
+Earn credits on every Claude Code session.
+
+```bash
+npx @project-ads/setup
+```
+
+One command. Registers your account, wires hooks into Claude Code, starts earning immediately.
+
+**Earnings:** 70% of CPM revenue, credited per impression to `~/.project-ads/wallet.json`.
+
+**Privacy:** no prompts, completions, or code ever leave your machine. Only the surface name is sent to log the impression.
+
+---
+
+## SDK (for AI tool builders)
+
+Integrate project-ads into your own AI tool:
+
+```bash
+npm install @project-ads/agent-ads
+```
+
+```ts
+import { showAd } from '@project-ads/agent-ads'
+
+// Call during AI wait states — never rejects, graceful fallback
+await showAd({ surface: 'claude-code-spinner' })
+```
+
+The SDK handles rate limiting, timeout, and wallet incrementing automatically.
+
+---
+
+## Packages
+
+| Package | Description |
+|---|---|
+| `@project-ads/agent-ads` | SDK — call `showAd()` from any AI tool |
+| `@project-ads/setup` | Publisher onboarding CLI |
+| `packages/server` | Ad server (Hono + Cloudflare R2, Fly.io) |
+
+---
+
+© 2026 project-ads. All rights reserved.
