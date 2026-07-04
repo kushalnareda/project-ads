@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, NoSuchKey } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
 import { config } from './config.js'
 
 const client = new S3Client({
@@ -9,6 +9,20 @@ const client = new S3Client({
     secretAccessKey: config.r2.secretAccessKey,
   },
 })
+
+export interface Campaign {
+  id: string
+  advertiser_name: string
+  ad_text: string
+  url: string
+  budget_cents: number   // total budget in cents
+  spent_cents: number    // running spend (eventual consistency at MVP scale)
+  cpm_cents: number      // advertiser pays per 1000 impressions, in cents
+  active: boolean
+  starts_at: string      // ISO
+  ends_at: string        // ISO
+  created_at: string
+}
 
 export interface Impression {
   surface: string
@@ -59,6 +73,58 @@ export async function registerPublisher(email: string): Promise<Publisher> {
   }))
 
   return publisher
+}
+
+export async function listCampaigns(): Promise<Campaign[]> {
+  const list = await client.send(new ListObjectsV2Command({
+    Bucket: config.r2.bucket,
+    Prefix: 'campaigns/',
+  }))
+
+  const keys = (list.Contents ?? [])
+    .map(o => o.Key!)
+    .filter(k => k.endsWith('.json'))
+
+  if (keys.length === 0) return []
+
+  const results = await Promise.allSettled(
+    keys.map(async key => {
+      const res = await client.send(new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }))
+      const body = await res.Body!.transformToString()
+      return JSON.parse(body) as Campaign
+    })
+  )
+
+  return results
+    .filter((r): r is PromiseFulfilledResult<Campaign> => r.status === 'fulfilled')
+    .map(r => r.value)
+}
+
+export async function upsertCampaign(campaign: Campaign): Promise<void> {
+  await client.send(new PutObjectCommand({
+    Bucket: config.r2.bucket,
+    Key: `campaigns/${campaign.id}.json`,
+    Body: JSON.stringify(campaign),
+    ContentType: 'application/json',
+  }))
+}
+
+export async function incrementCampaignSpend(id: string, deltaCents: number): Promise<void> {
+  const key = `campaigns/${id}.json`
+  try {
+    const res = await client.send(new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }))
+    const body = await res.Body!.transformToString()
+    const campaign = JSON.parse(body) as Campaign
+    campaign.spent_cents = (campaign.spent_cents ?? 0) + deltaCents
+    await client.send(new PutObjectCommand({
+      Bucket: config.r2.bucket,
+      Key: key,
+      Body: JSON.stringify(campaign),
+      ContentType: 'application/json',
+    }))
+  } catch (err) {
+    console.error('[r2] incrementCampaignSpend failed:', err instanceof Error ? err.message : err)
+  }
 }
 
 export async function logImpression(impression: Impression): Promise<void> {
