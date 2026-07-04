@@ -127,6 +127,59 @@ export async function incrementCampaignSpend(id: string, deltaCents: number): Pr
   }
 }
 
+export interface Ledger {
+  publisher_token: string
+  total_credits: number
+  total_impressions: number
+  daily: Record<string, { credits: number; impressions: number }>
+  updated_at: string
+}
+
+export async function getLedger(publisherToken: string): Promise<Ledger | null> {
+  const key = `ledgers/${publisherToken}.json`
+  try {
+    const res = await client.send(new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }))
+    const body = await res.Body!.transformToString()
+    return JSON.parse(body) as Ledger
+  } catch (err: any) {
+    const code = err?.Code ?? err?.code ?? err?.name
+    if (code === 'NoSuchKey') return null
+    throw err
+  }
+}
+
+export async function creditLedger(publisherToken: string, creditsDelta: number, timestamp: string): Promise<void> {
+  const key = `ledgers/${publisherToken}.json`
+  try {
+    const existing = await getLedger(publisherToken)
+    const ledger: Ledger = existing ?? {
+      publisher_token: publisherToken,
+      total_credits: 0,
+      total_impressions: 0,
+      daily: {},
+      updated_at: timestamp,
+    }
+
+    const day = timestamp.slice(0, 10)
+    const dayEntry = ledger.daily[day] ?? { credits: 0, impressions: 0 }
+    dayEntry.credits += creditsDelta
+    dayEntry.impressions += 1
+    ledger.daily[day] = dayEntry
+    ledger.total_credits += creditsDelta
+    ledger.total_impressions += 1
+    ledger.updated_at = timestamp
+
+    await client.send(new PutObjectCommand({
+      Bucket: config.r2.bucket,
+      Key: key,
+      Body: JSON.stringify(ledger),
+      ContentType: 'application/json',
+    }))
+  } catch (err) {
+    console.error('[r2] creditLedger failed:', err instanceof Error ? err.message : err)
+  }
+}
+
 export async function logImpression(impression: Impression): Promise<void> {
   const d = new Date(impression.timestamp)
   const year = d.getUTCFullYear()
