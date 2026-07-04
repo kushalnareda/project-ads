@@ -330,14 +330,27 @@ function logout() {
   document.getElementById('stats').style.display = 'none'
   document.getElementById('login').style.display = 'block'
 }
-// Auto-login: ?token= in URL wins, else saved token from a previous visit
-const urlToken = new URLSearchParams(location.search).get('token')
-if (urlToken) {
-  history.replaceState(null, '', '/dashboard') // strip token from address bar
-  load(urlToken)
-} else if (localStorage.getItem('pa_token')) {
-  load(localStorage.getItem('pa_token'))
+// Try local token server (installed by npx @project-ads/setup, port 41042)
+async function tryLocalToken() {
+  try {
+    const r = await fetch('http://localhost:41042/token', { signal: AbortSignal.timeout(400) })
+    if (r.ok) { const d = await r.json(); return d.token || null }
+  } catch {}
+  return null
 }
+// Auto-login priority: ?token= URL param → localStorage → local token server
+async function autoLogin() {
+  const urlToken = new URLSearchParams(location.search).get('token')
+  if (urlToken) {
+    history.replaceState(null, '', '/dashboard')
+    return load(urlToken)
+  }
+  const stored = localStorage.getItem('pa_token')
+  if (stored) return load(stored)
+  const local = await tryLocalToken()
+  if (local) return load(local)
+}
+autoLogin()
 document.getElementById('token').addEventListener('keydown', e => { if (e.key === 'Enter') load() })
 </script>
 </body>
