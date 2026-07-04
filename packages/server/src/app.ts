@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { config } from './config.js'
-import { listCampaigns, logImpression, registerPublisher, upsertCampaign, incrementCampaignSpend, creditLedger, getLedger, type Campaign } from './r2.js'
+import { listCampaigns, logImpression, registerPublisher, upsertCampaign, incrementCampaignSpend, creditLedger, getLedger, listLedgers, listPublishers, getPayouts, recordPayout, type Campaign, type Payout } from './r2.js'
 
 const app = new Hono()
 
@@ -212,6 +212,9 @@ app.get('/v1/admin/campaigns', async (c) => {
   }
 })
 
+// Minimum unpaid balance (credits == USD) before a publisher is payable
+const PAYOUT_MIN = 10
+
 // Publisher earnings — authenticated by publisher_token (bearer or query)
 app.get('/v1/publisher/earnings', async (c) => {
   const auth = c.req.header('authorization')
@@ -222,25 +225,104 @@ app.get('/v1/publisher/earnings', async (c) => {
   }
 
   try {
-    const ledger = await getLedger(token)
-    if (!ledger) {
-      // Registered but no impressions yet — return empty ledger rather than 404
-      return c.json({
-        total_credits: 0,
-        total_impressions: 0,
-        daily: {},
-        updated_at: null,
-      })
-    }
+    const [ledger, payouts] = await Promise.all([getLedger(token), getPayouts(token)])
+    const paid = payouts.reduce((sum, p) => sum + p.amount, 0)
+    const total = ledger?.total_credits ?? 0
     return c.json({
-      total_credits: ledger.total_credits,
-      total_impressions: ledger.total_impressions,
-      daily: ledger.daily,
-      updated_at: ledger.updated_at,
+      total_credits: total,
+      total_impressions: ledger?.total_impressions ?? 0,
+      paid_credits: paid,
+      unpaid_credits: Math.max(0, total - paid),
+      payout_minimum: PAYOUT_MIN,
+      payouts,
+      daily: ledger?.daily ?? {},
+      updated_at: ledger?.updated_at ?? null,
     })
   } catch (err) {
     console.error('[earnings]', err instanceof Error ? err.message : err)
     return c.json({ error: 'failed to load earnings' }, 500)
+  }
+})
+
+// Admin: list publishers with unpaid balance ≥ PAYOUT_MIN (with email so you can pay them)
+app.get('/v1/admin/payouts/due', async (c) => {
+  if (c.req.header('x-admin-token') !== config.adminToken) {
+    return c.json({ error: 'unauthorized' }, 401)
+  }
+
+  try {
+    const [ledgers, publishers] = await Promise.all([listLedgers(), listPublishers()])
+    const emailByToken = new Map(publishers.map(p => [p.token, p.email]))
+
+    const due = await Promise.all(
+      ledgers.map(async (l) => {
+        const payouts = await getPayouts(l.publisher_token)
+        const paid = payouts.reduce((sum, p) => sum + p.amount, 0)
+        const unpaid = l.total_credits - paid
+        return {
+          publisher_token: l.publisher_token,
+          email: emailByToken.get(l.publisher_token) ?? null,
+          total_credits: l.total_credits,
+          paid_credits: paid,
+          unpaid_credits: unpaid,
+          payable: unpaid >= PAYOUT_MIN,
+        }
+      })
+    )
+
+    return c.json({
+      payout_minimum: PAYOUT_MIN,
+      payable: due.filter(d => d.payable),
+      all: due.sort((a, b) => b.unpaid_credits - a.unpaid_credits),
+    })
+  } catch (err) {
+    console.error('[admin/payouts/due]', err instanceof Error ? err.message : err)
+    return c.json({ error: 'failed to compute payouts due' }, 500)
+  }
+})
+
+// Admin: record a payout after paying a publisher externally (Stripe/bank/PayPal/manual)
+app.post('/v1/admin/payouts', async (c) => {
+  if (c.req.header('x-admin-token') !== config.adminToken) {
+    return c.json({ error: 'unauthorized' }, 401)
+  }
+
+  let body: { publisher_token?: unknown; amount?: unknown; method?: unknown; reference?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: 'invalid JSON' }, 400)
+  }
+
+  if (
+    typeof body.publisher_token !== 'string' || !body.publisher_token ||
+    typeof body.amount !== 'number' || body.amount <= 0 ||
+    typeof body.method !== 'string' || !body.method
+  ) {
+    return c.json({ error: 'required: publisher_token (string), amount (number > 0), method (string); optional: reference' }, 400)
+  }
+
+  try {
+    // Guard against overpaying: amount must not exceed unpaid balance
+    const [ledger, payouts] = await Promise.all([getLedger(body.publisher_token), getPayouts(body.publisher_token)])
+    const paid = payouts.reduce((sum, p) => sum + p.amount, 0)
+    const unpaid = (ledger?.total_credits ?? 0) - paid
+    if (body.amount > unpaid + 1e-9) {
+      return c.json({ error: `amount ${body.amount} exceeds unpaid balance ${unpaid.toFixed(4)}` }, 400)
+    }
+
+    const payout: Payout = {
+      publisher_token: body.publisher_token,
+      amount: body.amount,
+      method: body.method,
+      reference: typeof body.reference === 'string' ? body.reference : '',
+      paid_at: new Date().toISOString(),
+    }
+    await recordPayout(payout)
+    return c.json({ payout, remaining_unpaid: unpaid - body.amount })
+  } catch (err) {
+    console.error('[admin/payouts]', err instanceof Error ? err.message : err)
+    return c.json({ error: 'failed to record payout' }, 500)
   }
 })
 
@@ -286,13 +368,22 @@ const DASHBOARD_HTML = `<!doctype html>
   </div>
   <div class="stats" id="stats">
     <div class="row">
-      <div class="stat"><div class="num" id="credits">–</div><div class="label">credits earned</div></div>
+      <div class="stat"><div class="num" id="credits">–</div><div class="label">earned (usd)</div></div>
+      <div class="stat"><div class="num" id="unpaid">–</div><div class="label">unpaid balance</div></div>
       <div class="stat"><div class="num" id="impressions">–</div><div class="label">impressions</div></div>
     </div>
+    <div id="payhint" style="font-size:12px;color:#7d8590;margin:-12px 0 20px;text-align:center"></div>
     <table>
       <thead><tr><th>day</th><th class="r">impressions</th><th class="r">credits</th></tr></thead>
       <tbody id="days"></tbody>
     </table>
+    <div id="payoutsWrap" style="display:none;margin-top:20px">
+      <div style="font-size:12px;color:#7d8590;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">payouts</div>
+      <table>
+        <thead><tr><th>date</th><th>method</th><th class="r">amount</th></tr></thead>
+        <tbody id="payouts"></tbody>
+      </table>
+    </div>
     <div style="margin-top:16px;font-size:12px;color:#7d8590;text-align:right">
       <a href="#" onclick="load(localStorage.getItem('pa_token'));return false" style="color:#58a6ff;margin-right:12px">refresh</a>
       <a href="#" onclick="logout();return false" style="color:#7d8590">sign out</a>
@@ -310,8 +401,21 @@ async function load(tokenArg) {
     if (!res.ok) throw new Error('HTTP ' + res.status)
     const d = await res.json()
     localStorage.setItem('pa_token', token)
-    document.getElementById('credits').textContent = (d.total_credits ?? 0).toFixed(4)
+    document.getElementById('credits').textContent = '$' + (d.total_credits ?? 0).toFixed(4)
+    document.getElementById('unpaid').textContent = '$' + (d.unpaid_credits ?? 0).toFixed(4)
     document.getElementById('impressions').textContent = d.total_impressions ?? 0
+    const min = d.payout_minimum ?? 10
+    const unpaid = d.unpaid_credits ?? 0
+    document.getElementById('payhint').textContent = unpaid >= min
+      ? 'payout eligible — you will be paid this cycle'
+      : '$' + (min - unpaid).toFixed(2) + ' more until $' + min + ' payout minimum'
+    const payouts = d.payouts ?? []
+    if (payouts.length) {
+      document.getElementById('payoutsWrap').style.display = 'block'
+      document.getElementById('payouts').innerHTML = payouts.map(p =>
+        '<tr><td>' + p.paid_at.slice(0, 10) + '</td><td>' + p.method + '</td><td class="r">$' + p.amount.toFixed(2) + '</td></tr>'
+      ).join('')
+    }
     const days = Object.entries(d.daily ?? {}).sort((a, b) => b[0].localeCompare(a[0]))
     document.getElementById('days').innerHTML = days.map(([day, v]) =>
       '<tr><td>' + day + '</td><td class="r">' + v.impressions + '</td><td class="r">' + v.credits.toFixed(4) + '</td></tr>'
