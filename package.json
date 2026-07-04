@@ -3,6 +3,8 @@
   "private": true,
   "workspaces": [
     "packages/sdk",
-    "packages/server"
+    "packages/server",
+    "packages/setup",
+    "packages/mcp"
   ]
 }

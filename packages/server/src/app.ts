@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { config } from './config.js'
-import { listCampaigns, logImpression, registerPublisher, upsertCampaign, incrementCampaignSpend, type Campaign } from './r2.js'
+import { listCampaigns, logImpression, registerPublisher, upsertCampaign, incrementCampaignSpend, creditLedger, getLedger, type Campaign } from './r2.js'
 
 const app = new Hono()
 
@@ -107,10 +107,13 @@ app.post('/v1/impression', async (c) => {
     publisher_token: typeof body.publisher_token === 'string' ? body.publisher_token : null,
   }
 
-  // Fire-and-forget: log impression + update spend concurrently, don't block response
+  // Fire-and-forget: log impression + update spend + credit ledger concurrently, don't block response
   void Promise.all([
     logImpression(impression),
     incrementCampaignSpend(campaign.id, costCents),
+    impression.publisher_token
+      ? creditLedger(impression.publisher_token, credits_delta, impression.timestamp)
+      : Promise.resolve(),
   ])
 
   // Invalidate cache so spend change reflects within next 60s window
@@ -208,6 +211,117 @@ app.get('/v1/admin/campaigns', async (c) => {
     return c.json({ error: 'failed to list campaigns' }, 500)
   }
 })
+
+// Publisher earnings — authenticated by publisher_token (bearer or query)
+app.get('/v1/publisher/earnings', async (c) => {
+  const auth = c.req.header('authorization')
+  const token = auth?.startsWith('Bearer ') ? auth.slice(7) : c.req.query('token')
+
+  if (!token) {
+    return c.json({ error: 'publisher token required (Authorization: Bearer <token>)' }, 401)
+  }
+
+  try {
+    const ledger = await getLedger(token)
+    if (!ledger) {
+      // Registered but no impressions yet — return empty ledger rather than 404
+      return c.json({
+        total_credits: 0,
+        total_impressions: 0,
+        daily: {},
+        updated_at: null,
+      })
+    }
+    return c.json({
+      total_credits: ledger.total_credits,
+      total_impressions: ledger.total_impressions,
+      daily: ledger.daily,
+      updated_at: ledger.updated_at,
+    })
+  } catch (err) {
+    console.error('[earnings]', err instanceof Error ? err.message : err)
+    return c.json({ error: 'failed to load earnings' }, 500)
+  }
+})
+
+// Publisher dashboard — static HTML, fetches earnings client-side
+app.get('/dashboard', (c) => c.html(DASHBOARD_HTML))
+
+const DASHBOARD_HTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>project-ads · earnings</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; box-sizing: border-box; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #0d1117; color: #e6edf3; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 48px 16px; }
+  h1 { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+  .sub { color: #7d8590; font-size: 13px; margin-bottom: 32px; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 24px; width: 100%; max-width: 560px; }
+  input { width: 100%; padding: 10px 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; font: inherit; margin-bottom: 12px; }
+  button { width: 100%; padding: 10px; background: #238636; border: none; border-radius: 6px; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  button:hover { background: #2ea043; }
+  .stats { display: none; }
+  .row { display: flex; gap: 12px; margin: 24px 0; }
+  .stat { flex: 1; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 16px; text-align: center; }
+  .stat .num { font-size: 24px; font-weight: 700; color: #3fb950; }
+  .stat .label { font-size: 11px; color: #7d8590; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 4px; border-bottom: 1px solid #21262d; }
+  th { color: #7d8590; font-weight: 500; }
+  td.r, th.r { text-align: right; }
+  .err { color: #f85149; font-size: 13px; margin-top: 8px; display: none; }
+</style>
+</head>
+<body>
+<h1>📢 project-ads</h1>
+<div class="sub">publisher earnings</div>
+<div class="card">
+  <div id="login">
+    <input id="token" type="password" placeholder="publisher token (from ~/.project-ads/config.json)">
+    <button onclick="load()">View earnings</button>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="stats" id="stats">
+    <div class="row">
+      <div class="stat"><div class="num" id="credits">–</div><div class="label">credits earned</div></div>
+      <div class="stat"><div class="num" id="impressions">–</div><div class="label">impressions</div></div>
+    </div>
+    <table>
+      <thead><tr><th>day</th><th class="r">impressions</th><th class="r">credits</th></tr></thead>
+      <tbody id="days"></tbody>
+    </table>
+  </div>
+</div>
+<script>
+async function load() {
+  const token = document.getElementById('token').value.trim()
+  const err = document.getElementById('err')
+  err.style.display = 'none'
+  if (!token) return
+  try {
+    const res = await fetch('/v1/publisher/earnings', { headers: { authorization: 'Bearer ' + token } })
+    if (!res.ok) throw new Error('HTTP ' + res.status)
+    const d = await res.json()
+    document.getElementById('credits').textContent = (d.total_credits ?? 0).toFixed(4)
+    document.getElementById('impressions').textContent = d.total_impressions ?? 0
+    const days = Object.entries(d.daily ?? {}).sort((a, b) => b[0].localeCompare(a[0]))
+    document.getElementById('days').innerHTML = days.map(([day, v]) =>
+      '<tr><td>' + day + '</td><td class="r">' + v.impressions + '</td><td class="r">' + v.credits.toFixed(4) + '</td></tr>'
+    ).join('') || '<tr><td colspan="3" style="color:#7d8590">no impressions yet</td></tr>'
+    document.getElementById('login').style.display = 'none'
+    document.getElementById('stats').style.display = 'block'
+  } catch (e) {
+    err.textContent = 'failed to load: ' + e.message
+    err.style.display = 'block'
+  }
+}
+document.getElementById('token').addEventListener('keydown', e => { if (e.key === 'Enter') load() })
+</script>
+</body>
+</html>`
 
 app.get('/health', (c) => c.json({ ok: true }))
 
