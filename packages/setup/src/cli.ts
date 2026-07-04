@@ -1,8 +1,9 @@
 import { createInterface } from 'readline'
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
-import { homedir } from 'os'
+import { homedir, platform } from 'os'
 import { fileURLToPath } from 'url'
+import { execSync } from 'child_process'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -11,11 +12,13 @@ const HOME     = homedir()
 const ADS_DIR  = join(HOME, '.project-ads')
 const CONFIG   = join(ADS_DIR, 'config.json')
 const HOOK     = join(ADS_DIR, 'hook.mjs')
+const TOKEN_SERVER = join(ADS_DIR, 'token-server.mjs')
 const SL_HOOK  = join(HOME, '.claude', 'hooks', 'project-ads-statusline.mjs')
 const SETTINGS = join(HOME, '.claude', 'settings.json')
 
-const HOOK_SRC = join(__dirname, '..', 'hooks', 'hook.mjs')
-const SL_SRC   = join(__dirname, '..', 'hooks', 'statusline.mjs')
+const HOOK_SRC         = join(__dirname, '..', 'hooks', 'hook.mjs')
+const SL_SRC           = join(__dirname, '..', 'hooks', 'statusline.mjs')
+const TOKEN_SERVER_SRC = join(__dirname, '..', 'hooks', 'token-server.mjs')
 
 async function main() {
   console.log('project-ads setup\n')
@@ -52,11 +55,63 @@ async function main() {
   copyFileSync(SL_SRC, SL_HOOK)
   console.log(`✓ ${SL_HOOK}`)
 
+  copyFileSync(TOKEN_SERVER_SRC, TOKEN_SERVER)
+  console.log(`✓ ${TOKEN_SERVER}`)
+
   wireSettings()
   console.log(`✓ ${SETTINGS}`)
 
+  installTokenServer()
+
   console.log('\nAll set. Earn credits on every Claude Code session.')
   console.log(`\nYour dashboard: ${SERVER}/dashboard?token=${token}`)
+}
+
+function installTokenServer() {
+  if (platform() !== 'darwin') {
+    // LaunchAgent only on macOS; other platforms need manual startup
+    console.log('ℹ  Token server: run `node ~/.project-ads/token-server.mjs` to enable dashboard auto-login')
+    return
+  }
+
+  const nodePath = process.execPath
+  const launchAgentsDir = join(HOME, 'Library', 'LaunchAgents')
+  const plistPath = join(launchAgentsDir, 'com.project-ads.token-server.plist')
+
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.project-ads.token-server</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${nodePath}</string>
+    <string>${TOKEN_SERVER}</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardErrorPath</key>
+  <string>${ADS_DIR}/token-server.log</string>
+  <key>StandardOutPath</key>
+  <string>${ADS_DIR}/token-server.log</string>
+</dict>
+</plist>
+`
+
+  mkdirSync(launchAgentsDir, { recursive: true })
+  writeFileSync(plistPath, plist)
+
+  try {
+    // Unload first in case already running (ignore error if not loaded)
+    try { execSync(`launchctl unload "${plistPath}" 2>/dev/null`, { stdio: 'ignore' }) } catch {}
+    execSync(`launchctl load "${plistPath}"`)
+    console.log('✓ token server started (auto-login enabled for dashboard)')
+  } catch (err) {
+    console.log(`ℹ  token server plist written but launchctl failed — run manually: node ${TOKEN_SERVER}`)
+  }
 }
 
 function wireSettings() {
