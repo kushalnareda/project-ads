@@ -1,7 +1,7 @@
 import { increment } from './wallet.js'
 import { render } from './display.js'
 
-const AD_SERVER_URL = process.env['PROJECT_ADS_URL'] ?? 'https://api.project-ads.com/v1/impression'
+const AD_SERVER_URL = process.env['PROJECT_ADS_URL'] ?? 'https://project-ads.fly.dev/v1/impression'
 const SDK_VERSION = '0.1.0'
 const RATE_LIMIT_MS = 5000
 const FETCH_TIMEOUT_MS = 2000

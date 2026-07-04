@@ -8,7 +8,11 @@ const app = new Hono()
 const SURFACE_FRACTION: Record<string, number> = {
   'claude-code-spinner': 1.0,
   'claude-code-statusline': 0.2,
+  'claude-code-userprompt': 1.0,
 }
+
+// Base credits for default (env-var) ad per full-fraction impression
+const DEFAULT_BASE_CREDITS = 0.001
 
 // Campaign cache — refresh every 60s to avoid R2 reads per impression
 let campaignCache: { data: Campaign[]; expires: number } | null = null
@@ -21,8 +25,10 @@ async function selectCampaign(surface: string): Promise<{ campaign: Campaign; cr
       campaignCache = { data: campaigns, expires: now + 60_000 }
     } catch (err) {
       console.error('[campaigns] list failed:', err instanceof Error ? err.message : err)
-      // Serve from stale cache rather than dropping the impression
-      if (!campaignCache) return null
+      if (!campaignCache) {
+        // No stale cache — fall through to default ad check below
+        campaignCache = { data: [], expires: 0 }
+      }
     }
   }
 
@@ -34,12 +40,32 @@ async function selectCampaign(surface: string): Promise<{ campaign: Campaign; cr
     c.spent_cents < c.budget_cents
   )
 
-  if (eligible.length === 0) return null
+  const surfaceFraction = SURFACE_FRACTION[surface] ?? 1.0
+
+  if (eligible.length === 0) {
+    // Fall back to default env-var ad (house ad / placeholder)
+    if (!config.defaultAd.text || !config.defaultAd.url) return null
+    const credits_delta = DEFAULT_BASE_CREDITS * surfaceFraction
+    return {
+      campaign: {
+        id: 'default',
+        advertiser_name: 'default',
+        ad_text: config.defaultAd.text,
+        url: config.defaultAd.url,
+        budget_cents: Infinity,
+        spent_cents: 0,
+        cpm_cents: 0,
+        active: true,
+        starts_at: '',
+        ends_at: '',
+        created_at: '',
+      },
+      credits_delta,
+    }
+  }
 
   // Highest CPM wins — simple priority auction
   const campaign = eligible.sort((a, b) => b.cpm_cents - a.cpm_cents)[0]
-
-  const surfaceFraction = SURFACE_FRACTION[surface] ?? 1.0
   const credits_delta = (campaign.cpm_cents / 1000 / 100) * config.publisherShare * surfaceFraction
 
   return { campaign, credits_delta }
