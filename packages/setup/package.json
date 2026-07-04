@@ -1,0 +1,24 @@
+{
+  "name": "@project-ads/setup",
+  "version": "0.1.0",
+  "description": "Install project-ads for Claude Code",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "project-ads-setup": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "files": [
+    "dist",
+    "hooks"
+  ],
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  }
+}

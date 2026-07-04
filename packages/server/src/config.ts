@@ -12,7 +12,11 @@ export const config = {
   ad: {
     text: require('AD_TEXT'),
     url: require('AD_URL'),
-    creditsDelta: parseFloat(optional('CREDITS_DELTA', '0.001')),
+    credits: {
+      spinner: parseFloat(optional('CREDITS_SPINNER', '0.001')),
+      statusLine: parseFloat(optional('CREDITS_STATUSLINE', '0.0002')),
+      default: parseFloat(optional('CREDITS_DELTA', '0.001')),
+    },
   },
   r2: {
     accountId: require('R2_ACCOUNT_ID'),
