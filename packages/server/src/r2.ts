@@ -180,6 +180,89 @@ export async function creditLedger(publisherToken: string, creditsDelta: number,
   }
 }
 
+export interface Payout {
+  publisher_token: string
+  amount: number          // credits (== USD) paid out
+  method: string          // 'stripe' | 'bank' | 'paypal' | 'manual' | ...
+  reference: string       // external payment reference / note
+  paid_at: string         // ISO
+}
+
+export async function listLedgers(): Promise<Ledger[]> {
+  const list = await client.send(new ListObjectsV2Command({
+    Bucket: config.r2.bucket,
+    Prefix: 'ledgers/',
+  }))
+
+  const keys = (list.Contents ?? []).map(o => o.Key!).filter(k => k.endsWith('.json'))
+  if (keys.length === 0) return []
+
+  const results = await Promise.allSettled(
+    keys.map(async key => {
+      const res = await client.send(new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }))
+      return JSON.parse(await res.Body!.transformToString()) as Ledger
+    })
+  )
+
+  return results
+    .filter((r): r is PromiseFulfilledResult<Ledger> => r.status === 'fulfilled')
+    .map(r => r.value)
+}
+
+export async function listPublishers(): Promise<Publisher[]> {
+  const list = await client.send(new ListObjectsV2Command({
+    Bucket: config.r2.bucket,
+    Prefix: 'publishers/',
+  }))
+
+  const keys = (list.Contents ?? []).map(o => o.Key!).filter(k => k.endsWith('.json'))
+  if (keys.length === 0) return []
+
+  const results = await Promise.allSettled(
+    keys.map(async key => {
+      const res = await client.send(new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }))
+      return JSON.parse(await res.Body!.transformToString()) as Publisher
+    })
+  )
+
+  return results
+    .filter((r): r is PromiseFulfilledResult<Publisher> => r.status === 'fulfilled')
+    .map(r => r.value)
+}
+
+export async function getPayouts(publisherToken: string): Promise<Payout[]> {
+  const list = await client.send(new ListObjectsV2Command({
+    Bucket: config.r2.bucket,
+    Prefix: `payouts/${publisherToken}/`,
+  }))
+
+  const keys = (list.Contents ?? []).map(o => o.Key!).filter(k => k.endsWith('.json'))
+  if (keys.length === 0) return []
+
+  const results = await Promise.allSettled(
+    keys.map(async key => {
+      const res = await client.send(new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }))
+      return JSON.parse(await res.Body!.transformToString()) as Payout
+    })
+  )
+
+  return results
+    .filter((r): r is PromiseFulfilledResult<Payout> => r.status === 'fulfilled')
+    .map(r => r.value)
+    .sort((a, b) => b.paid_at.localeCompare(a.paid_at))
+}
+
+export async function recordPayout(payout: Payout): Promise<void> {
+  // Timestamp in key keeps receipts append-only and naturally ordered
+  const key = `payouts/${payout.publisher_token}/${payout.paid_at}.json`
+  await client.send(new PutObjectCommand({
+    Bucket: config.r2.bucket,
+    Key: key,
+    Body: JSON.stringify(payout),
+    ContentType: 'application/json',
+  }))
+}
+
 export async function logImpression(impression: Impression): Promise<void> {
   const d = new Date(impression.timestamp)
   const year = d.getUTCFullYear()
