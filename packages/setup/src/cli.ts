@@ -21,19 +21,31 @@ const SL_SRC           = join(__dirname, '..', 'hooks', 'statusline.mjs')
 const TOKEN_SERVER_SRC = join(__dirname, '..', 'hooks', 'token-server.mjs')
 
 async function main() {
-  console.log('project-ads setup\n')
+  console.log('\n📢  project-ads — earn credits on every Claude Code session\n')
 
-  const email = await prompt('Email: ')
+  // Required
+  const email = await prompt('◇  Your email: ')
   if (!email.includes('@')) {
-    console.error('Invalid email.')
+    console.error('   Invalid email.')
     process.exit(1)
   }
 
-  process.stdout.write('Registering... ')
+  const name = await prompt('◇  Your name: ')
+  if (!name.trim()) {
+    console.error('   Name is required.')
+    process.exit(1)
+  }
+
+  // Optional — used to send you more relevant ads later. Enter to skip.
+  const role = await prompt('◇  What do you do? (role / profession — Enter to skip): ')
+  const country = await prompt('◇  Where are you based? (country — Enter to skip): ')
+  const heard_from = await prompt('◇  Where did you hear about us? (Enter to skip): ')
+
+  process.stdout.write('\nRegistering... ')
   const res = await fetch(`${SERVER}/v1/publisher/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, name, role, country, heard_from }),
   })
 
   if (!res.ok) {
@@ -41,11 +53,11 @@ async function main() {
     process.exit(1)
   }
 
-  const { token } = (await res.json()) as { token: string }
-  console.log('done')
+  const { token } = (await res.json()) as { token: string; name?: string; registered_at?: string }
+  console.log(`done — welcome, ${name}!`)
 
   mkdirSync(ADS_DIR, { recursive: true })
-  writeFileSync(CONFIG, JSON.stringify({ publisher_token: token, email }, null, 2) + '\n')
+  writeFileSync(CONFIG, JSON.stringify({ publisher_token: token, email, name, role, country, heard_from }, null, 2) + '\n')
   console.log(`✓ ${CONFIG}`)
 
   copyFileSync(HOOK_SRC, HOOK)
