@@ -22,3 +22,6 @@
 .synapse/
 .windsurfrules
 .DS_Store
+
+# Internal strategy docs — never publish (public repo)
+docs/gtm-playbook.md

@@ -51,6 +51,11 @@ const DEFAULT_BASE_CREDITS = 0.001
 // Campaign cache — refresh every 60s to avoid R2 reads per impression
 let campaignCache: { data: Campaign[]; expires: number } | null = null
 
+// Test hook.
+export function resetCampaignCache(): void {
+  campaignCache = null
+}
+
 async function selectCampaign(surface: string): Promise<{ campaign: Campaign; credits_delta: number } | null> {
   const now = Date.now()
   if (!campaignCache || now > campaignCache.expires) {
@@ -98,8 +103,13 @@ async function selectCampaign(surface: string): Promise<{ campaign: Campaign; cr
     }
   }
 
-  // Highest CPM wins — simple priority auction
-  const campaign = eligible.sort((a, b) => b.cpm_cents - a.cpm_cents)[0]
+  // Highest CPM wins — simple priority auction. Campaigns tied at the top
+  // CPM rotate randomly so multiple advertisers at the same price all get
+  // impressions instead of one starving the rest.
+  const sorted = eligible.sort((a, b) => b.cpm_cents - a.cpm_cents)
+  const topCpm = sorted[0].cpm_cents
+  const top = sorted.filter(c => c.cpm_cents === topCpm)
+  const campaign = top[Math.floor(Math.random() * top.length)]
   const credits_delta = (campaign.cpm_cents / 1000 / 100) * config.publisherShare * surfaceFraction
 
   return { campaign, credits_delta }

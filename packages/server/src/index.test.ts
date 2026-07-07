@@ -31,7 +31,7 @@ vi.stubEnv('R2_BUCKET', 'test-bucket')
 const { __send } = await import('@aws-sdk/client-s3') as any
 
 // Import app after mocks
-const { default: app } = await import('./app.js')
+const { default: app, resetCampaignCache } = await import('./app.js')
 const { resetRateLimits } = await import('./ratelimit.js')
 
 const TOKEN = '11111111-2222-4333-8444-555555555555'
@@ -49,6 +49,7 @@ const admin = { 'x-admin-token': 'test-admin-token' }
 beforeEach(() => {
   vi.clearAllMocks()
   resetRateLimits()
+  resetCampaignCache()
 })
 
 describe('GET /health', () => {
@@ -106,6 +107,33 @@ describe('POST /v1/impression', () => {
     expect(res.status).toBe(400)
     const body = await res.json()
     expect(body.error).toBe('invalid publisher_token')
+  })
+
+  it('rotates between campaigns tied at the top CPM', async () => {
+    const mk = (id: string, text: string) => ({
+      id, advertiser_name: id, ad_text: text, url: 'https://' + id + '.example',
+      budget_cents: 10_000, spent_cents: 0, cpm_cents: 500, active: true,
+      starts_at: '2020-01-01T00:00:00Z', ends_at: '2030-01-01T00:00:00Z', created_at: '',
+    })
+    const campaigns = [mk('aaaaaaaa-0000-4000-8000-000000000001', 'site one'), mk('aaaaaaaa-0000-4000-8000-000000000002', 'site two'), mk('aaaaaaaa-0000-4000-8000-000000000003', 'site three')]
+    __send.mockImplementation(async (cmd: any) => {
+      if (cmd.__type === 'List') return { Contents: campaigns.map(c => ({ Key: `campaigns/${c.id}.json` })) }
+      if (cmd.__type === 'Get' && cmd.input.Key.startsWith('campaigns/')) {
+        const c = campaigns.find(x => cmd.input.Key.includes(x.id))!
+        return { Body: { transformToString: async () => JSON.stringify(c) } }
+      }
+      return {}
+    })
+    // Fresh module state has a 60s campaign cache; served ads over many
+    // requests should cover all three tied campaigns.
+    const seen = new Set<string>()
+    for (let i = 0; i < 50 && seen.size < 3; i++) {
+      const res = await req('/v1/impression', { surface: 'claude-code-spinner' })
+      if (res.status === 429) { resetRateLimits(); continue }
+      const body = await res.json()
+      seen.add(body.ad_text)
+    }
+    expect(seen.size).toBe(3)
   })
 
   it('rate limits a publisher token after 60 requests/min', async () => {
