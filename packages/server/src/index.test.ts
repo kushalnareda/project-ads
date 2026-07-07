@@ -153,31 +153,38 @@ describe('POST /v1/publisher/register', () => {
   })
 
   it('rejects email without TLD', async () => {
-    const res = await req('/v1/publisher/register', { email: 'a@b' })
+    const res = await req('/v1/publisher/register', { email: 'a@b', name: 'X' })
     expect(res.status).toBe(400)
   })
 
-  it('creates new publisher when key missing', async () => {
+  it('rejects missing name', async () => {
+    const res = await req('/v1/publisher/register', { email: 'noname@example.com' })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('name is required')
+  })
+
+  it('creates new publisher when key missing, storing name', async () => {
     const notFound = new Error('NoSuchKey')
     ;(notFound as any).Code = 'NoSuchKey'
     __send
       .mockRejectedValueOnce(notFound)  // GetObject → not found
       .mockResolvedValueOnce({})         // PutObject → ok
 
-    const res = await req('/v1/publisher/register', { email: 'new@example.com' })
+    const res = await req('/v1/publisher/register', { email: 'new@example.com', name: 'Ada Lovelace', role: 'Engineer', country: 'UK', heard_from: 'X' })
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.token).toMatch(/^[0-9a-f-]{36}$/)
+    expect(body.name).toBe('Ada Lovelace')
     expect(body.registered_at).toBeDefined()
   })
 
   it('returns existing token when already registered (idempotent)', async () => {
-    const existing = { email: 'existing@example.com', token: 'existing-token-uuid', registered_at: '2026-01-01T00:00:00Z' }
-    __send.mockResolvedValueOnce({
+    const existing = { email: 'existing@example.com', token: 'existing-token-uuid', name: 'Grace', registered_at: '2026-01-01T00:00:00Z' }
+    __send.mockResolvedValue({
       Body: { transformToString: async () => JSON.stringify(existing) },
     })
 
-    const res = await req('/v1/publisher/register', { email: 'existing@example.com' })
+    const res = await req('/v1/publisher/register', { email: 'existing@example.com', name: 'Grace' })
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.token).toBe('existing-token-uuid')
@@ -188,15 +195,15 @@ describe('POST /v1/publisher/register', () => {
     ;(err as any).Code = 'InternalError'
     __send.mockRejectedValue(err)
 
-    const res = await req('/v1/publisher/register', { email: 'test@example.com' })
+    const res = await req('/v1/publisher/register', { email: 'test@example.com', name: 'Test' })
     expect(res.status).toBe(500)
   })
 
   it('rate limits registration per IP after 10/hour', async () => {
-    __send.mockResolvedValue({ Body: { transformToString: async () => JSON.stringify({ email: 'a@b.co', token: TOKEN, registered_at: '' }) } })
+    __send.mockResolvedValue({ Body: { transformToString: async () => JSON.stringify({ email: 'a@b.co', token: TOKEN, name: 'A', registered_at: '' }) } })
     let last: Response | undefined
     for (let i = 0; i < 11; i++) {
-      last = await req('/v1/publisher/register', { email: `user${i}@example.com` })
+      last = await req('/v1/publisher/register', { email: `user${i}@example.com`, name: 'A' })
     }
     expect(last!.status).toBe(429)
   })
@@ -319,5 +326,116 @@ describe('POST /v1/admin/payouts', () => {
   it('rejects non-UUID publisher_token', async () => {
     const res = await req('/v1/admin/payouts', { publisher_token: 'nope', amount: 12, method: 'stripe' }, admin)
     expect(res.status).toBe(400)
+  })
+})
+
+// Shared R2 mock for payout-request flows: dispatches by command type + key prefix.
+function mockPayoutRequestState(opts: { credits: number; payouts?: any[]; requests?: any[] }) {
+  const payouts = opts.payouts ?? []
+  const requests = opts.requests ?? []
+  __send.mockImplementation(async (cmd: any) => {
+    const key = cmd.input?.Key ?? ''
+    const prefix = cmd.input?.Prefix ?? ''
+    if (cmd.__type === 'Get' && key.startsWith('ledgers/')) {
+      return { Body: { transformToString: async () => JSON.stringify({ publisher_token: TOKEN, total_credits: opts.credits, total_impressions: 1, daily: {}, updated_at: '' }) } }
+    }
+    if (cmd.__type === 'List' && prefix.startsWith('payout_requests/')) {
+      return { Contents: requests.map((r) => ({ Key: `payout_requests/${TOKEN}/${r.requested_at}.json` })) }
+    }
+    if (cmd.__type === 'Get' && key.startsWith('payout_requests/')) {
+      const r = requests.find((x) => key.includes(x.requested_at)) ?? requests[0]
+      return { Body: { transformToString: async () => JSON.stringify(r) } }
+    }
+    if (cmd.__type === 'List' && prefix.startsWith('payouts/')) {
+      return { Contents: payouts.map((_, i) => ({ Key: `payouts/${TOKEN}/p${i}.json` })) }
+    }
+    if (cmd.__type === 'Get' && key.startsWith('payouts/')) {
+      const i = parseInt(key.match(/p(\d)\./)![1], 10)
+      return { Body: { transformToString: async () => JSON.stringify(payouts[i]) } }
+    }
+    if (cmd.__type === 'List' && prefix.startsWith('publishers/')) {
+      return { Contents: [{ Key: 'publishers/h.json' }] }
+    }
+    if (cmd.__type === 'Get' && key.startsWith('publishers/')) {
+      return { Body: { transformToString: async () => JSON.stringify({ email: 'p@ex.com', token: TOKEN, name: 'Pat', registered_at: '' }) } }
+    }
+    return {}
+  })
+}
+
+describe('POST /v1/publisher/payout-request', () => {
+  const auth = { authorization: 'Bearer ' + TOKEN }
+
+  it('rejects without token', async () => {
+    mockPayoutRequestState({ credits: 20 })
+    const res = await req('/v1/publisher/payout-request', { method: 'paypal', destination: 'me@paypal.com' })
+    expect(res.status).toBe(401)
+  })
+
+  it('rejects an unknown method', async () => {
+    mockPayoutRequestState({ credits: 20 })
+    const res = await req('/v1/publisher/payout-request', { method: 'crypto', destination: 'x' }, auth)
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects when unpaid balance is below the minimum', async () => {
+    mockPayoutRequestState({ credits: 5 })
+    const res = await req('/v1/publisher/payout-request', { method: 'paypal', destination: 'me@paypal.com' }, auth)
+    expect(res.status).toBe(400)
+  })
+
+  it('creates a pending request for the full unpaid balance', async () => {
+    mockPayoutRequestState({ credits: 20 })
+    const res = await req('/v1/publisher/payout-request', { method: 'paypal', destination: 'me@paypal.com' }, auth)
+    expect(res.status).toBe(200)
+    const b = await res.json()
+    expect(b.request.status).toBe('pending')
+    expect(b.request.amount).toBeCloseTo(20)
+    expect(b.request.method).toBe('paypal')
+  })
+
+  it('rejects a second request while one is pending', async () => {
+    mockPayoutRequestState({ credits: 20, requests: [{ publisher_token: TOKEN, amount: 20, method: 'paypal', destination: 'x', status: 'pending', requested_at: '2026-07-08T00:00:00Z' }] })
+    const res = await req('/v1/publisher/payout-request', { method: 'paypal', destination: 'me@paypal.com' }, auth)
+    expect(res.status).toBe(409)
+  })
+})
+
+describe('admin payout-requests', () => {
+  const reqAt = '2026-07-08T00:00:00Z'
+  const pending = { publisher_token: TOKEN, amount: 12, method: 'paypal', destination: 'me@paypal.com', status: 'pending', requested_at: reqAt }
+
+  it('list requires admin token', async () => {
+    const res = await app.request('/v1/admin/payout-requests')
+    expect(res.status).toBe(401)
+  })
+
+  it('lists requests joined with publisher name/email', async () => {
+    mockPayoutRequestState({ credits: 20, requests: [pending] })
+    const res = await app.request('/v1/admin/payout-requests', { headers: admin })
+    expect(res.status).toBe(200)
+    const b = await res.json()
+    expect(b.requests[0].name).toBe('Pat')
+    expect(b.requests[0].status).toBe('pending')
+  })
+
+  it("resolve 'paid' records a payout and flips status", async () => {
+    mockPayoutRequestState({ credits: 15, requests: [pending] })
+    const res = await req('/v1/admin/payout-requests/resolve', { publisher_token: TOKEN, requested_at: reqAt, action: 'paid' }, admin)
+    expect(res.status).toBe(200)
+    const b = await res.json()
+    expect(b.request.status).toBe('paid')
+    const payoutPuts = __send.mock.calls.filter(([c]: any[]) => c.__type === 'Put' && (c.input?.Key ?? '').startsWith('payouts/'))
+    expect(payoutPuts).toHaveLength(1)
+  })
+
+  it("resolve 'rejected' closes without recording a payout", async () => {
+    mockPayoutRequestState({ credits: 15, requests: [pending] })
+    const res = await req('/v1/admin/payout-requests/resolve', { publisher_token: TOKEN, requested_at: reqAt, action: 'rejected' }, admin)
+    expect(res.status).toBe(200)
+    const b = await res.json()
+    expect(b.request.status).toBe('rejected')
+    const payoutPuts = __send.mock.calls.filter(([c]: any[]) => c.__type === 'Put' && (c.input?.Key ?? '').startsWith('payouts/'))
+    expect(payoutPuts).toHaveLength(0)
   })
 })
