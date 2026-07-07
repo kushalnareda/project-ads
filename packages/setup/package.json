@@ -1,6 +1,6 @@
 {
   "name": "@project-ads/setup",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Install project-ads for Claude Code",
   "type": "module",
   "engines": {
