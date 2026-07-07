@@ -20,6 +20,20 @@ const HOOK_SRC         = join(__dirname, '..', 'hooks', 'hook.mjs')
 const SL_SRC           = join(__dirname, '..', 'hooks', 'statusline.mjs')
 const TOKEN_SERVER_SRC = join(__dirname, '..', 'hooks', 'token-server.mjs')
 
+// Standard acquisition channels for a developer tool.
+const HEARD_FROM_OPTIONS = [
+  'X / Twitter',
+  'GitHub',
+  'Hacker News',
+  'Reddit',
+  'YouTube',
+  'LinkedIn',
+  'Friend or colleague',
+  'Blog or newsletter',
+  'Search engine',
+  'Other',
+]
+
 async function main() {
   console.log('\n📢  project-ads — earn credits on every Claude Code session\n')
 
@@ -39,7 +53,7 @@ async function main() {
   // Optional — used to send you more relevant ads later. Enter to skip.
   const role = await prompt('◇  What do you do? (role / profession — Enter to skip): ')
   const country = await prompt('◇  Where are you based? (country — Enter to skip): ')
-  const heard_from = await prompt('◇  Where did you hear about us? (Enter to skip): ')
+  const heard_from = await choose('Where did you hear about us?', HEARD_FROM_OPTIONS)
 
   process.stdout.write('\nRegistering... ')
   const res = await fetch(`${SERVER}/v1/publisher/register`, {
@@ -160,6 +174,22 @@ function addHookIfMissing(
   if (!exists) {
     entries.push({ hooks: [{ type: 'command', command, timeout }] })
   }
+}
+
+// Numbered single-select. Prints options, reads a number; Enter or an
+// out-of-range answer skips (returns ''). "Other" lets them type free text.
+async function choose(question: string, options: string[]): Promise<string> {
+  console.log(`◇  ${question}`)
+  options.forEach((o, i) => console.log(`   ${i + 1}. ${o}`))
+  const ans = await prompt('   Pick a number (Enter to skip): ')
+  const n = parseInt(ans, 10)
+  if (!Number.isInteger(n) || n < 1 || n > options.length) return ''
+  const choice = options[n - 1]
+  if (choice === 'Other') {
+    const other = await prompt('   Tell us where: ')
+    return other || 'Other'
+  }
+  return choice
 }
 
 function prompt(q: string): Promise<string> {
