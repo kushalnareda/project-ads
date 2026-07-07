@@ -12,7 +12,7 @@ function supportsOsc8(): boolean {
     term === 'WezTerm' ||
     term === 'ghostty' ||
     colorterm === 'truecolor' ||
-    colorterm === 'truecolor'
+    colorterm === '24bit'
   )
 }
 
