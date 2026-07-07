@@ -10,6 +10,11 @@ on:
     branches: [main]
     paths: ['packages/setup/**']
 
+permissions:
+  contents: write   # semantic-release pushes tags + release commits
+  issues: write
+  pull-requests: write
+
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
