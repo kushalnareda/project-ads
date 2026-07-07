@@ -227,6 +227,14 @@ describe('POST /v1/admin/campaign', () => {
   })
 })
 
+describe('GET /admin', () => {
+  it('serves the admin console HTML', async () => {
+    const res = await app.request('/admin')
+    expect(res.status).toBe(200)
+    expect(await res.text()).toContain('admin console')
+  })
+})
+
 describe('GET /v1/publisher/earnings', () => {
   it('rejects missing or malformed token', async () => {
     const res1 = await app.request('/v1/publisher/earnings')

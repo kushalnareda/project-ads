@@ -52,6 +52,8 @@ await showAd({ surface: 'claude-code-spinner' })
 
 The SDK handles rate limiting, timeout, and wallet incrementing automatically.
 
+Rate limiting is layered: the SDK enforces a 5-second minimum between ads **per process** (parallel CI agents each get their own window), and the server additionally enforces 60 impressions/minute per publisher token, so a fleet of parallel agents can't over-count impressions.
+
 ---
 
 ## Packages

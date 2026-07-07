@@ -5,6 +5,7 @@ import { listCampaigns, logImpression, registerPublisher, upsertCampaign, increm
 import { allow } from './ratelimit.js'
 import { isPublisherToken, isUuid, isValidAdUrl, isValidEmail, isIsoDate, sanitizeAdText, AD_TEXT_MAX } from './validate.js'
 import { log } from './logger.js'
+import { ADMIN_HTML } from './admin.js'
 
 const app = new Hono()
 
@@ -412,6 +413,9 @@ app.post('/v1/admin/payouts', async (c) => {
 
 // Publisher dashboard — static HTML, fetches earnings client-side
 app.get('/dashboard', (c) => c.html(DASHBOARD_HTML))
+
+// Admin console — static HTML; every API call it makes is x-admin-token gated
+app.get('/admin', (c) => c.html(ADMIN_HTML))
 
 const DASHBOARD_HTML = `<!doctype html>
 <html lang="en">
