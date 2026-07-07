@@ -432,7 +432,7 @@ const DASHBOARD_HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>project-ads · earnings</title>
+<title>Adline · earnings</title>
 <style>
   :root { color-scheme: dark; }
   * { margin: 0; box-sizing: border-box; }
@@ -456,11 +456,11 @@ const DASHBOARD_HTML = `<!doctype html>
 </style>
 </head>
 <body>
-<h1>📢 project-ads</h1>
+<h1>📢 Adline</h1>
 <div class="sub">publisher earnings</div>
 <div class="card">
   <div id="login">
-    <input id="token" type="password" placeholder="publisher token (from ~/.project-ads/config.json)">
+    <input id="token" type="password" placeholder="publisher token (from ~/.adline/config.json)">
     <button onclick="load()">View earnings</button>
     <div class="err" id="err"></div>
   </div>
@@ -532,7 +532,7 @@ function logout() {
   document.getElementById('stats').style.display = 'none'
   document.getElementById('login').style.display = 'block'
 }
-// Try local token server (installed by npx @project-ads/setup, port 41042)
+// Try local token server (installed by npx @adline/setup, port 41042)
 async function tryLocalToken() {
   try {
     const r = await fetch('http://localhost:41042/token', { signal: AbortSignal.timeout(400) })

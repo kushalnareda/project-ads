@@ -1,13 +1,13 @@
 {
-  "name": "@project-ads/mcp",
+  "name": "@adline/mcp",
   "version": "0.1.0",
-  "description": "MCP server for project-ads publisher earnings",
+  "description": "MCP server for Adline publisher earnings",
   "type": "module",
   "engines": {
     "node": ">=18"
   },
   "bin": {
-    "project-ads-mcp": "./dist/index.js"
+    "adline-mcp": "./dist/index.js"
   },
   "scripts": {
     "build": "tsup",

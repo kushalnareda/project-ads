@@ -4,14 +4,14 @@ import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
-const DIR         = join(homedir(), '.project-ads')
+const DIR         = join(homedir(), '.adline')
 const FRAME       = join(DIR, 'frame.json')
 const CACHE       = join(DIR, 'statusline-cache.json')
 const LAST_ACTIVE = join(DIR, '.last-active')
 const LAST_IMP    = join(DIR, '.last-statusline-impression')
 const WALLET      = join(DIR, 'wallet.json')
 const CONFIG      = join(DIR, 'config.json')
-const AD_URL      = process.env.PROJECT_ADS_URL ?? 'https://project-ads.fly.dev/v1/impression'
+const AD_URL      = process.env.ADLINE_URL ?? 'https://adline.fly.dev/v1/impression'
 const CACHE_TTL   = 30_000
 const IDLE_MS     = 5 * 60 * 1000   // 5 min idle before logging impression
 const IMP_GATE_MS = 5 * 60 * 1000   // min gap between statusline impressions

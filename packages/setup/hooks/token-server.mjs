@@ -3,9 +3,9 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
-const CONFIG = join(homedir(), '.project-ads', 'config.json')
+const CONFIG = join(homedir(), '.adline', 'config.json')
 const PORT = 41042
-const ALLOWED_ORIGIN = 'https://project-ads.fly.dev'
+const ALLOWED_ORIGIN = 'https://adline.fly.dev'
 
 createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGIN)

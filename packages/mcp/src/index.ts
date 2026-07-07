@@ -1,4 +1,4 @@
-// MCP server — publisher earnings tools for project-ads
+// MCP server — publisher earnings tools for Adline
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
@@ -6,9 +6,9 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
-const SERVER = process.env.PROJECT_ADS_URL_BASE ?? 'https://project-ads.fly.dev'
-const CONFIG = join(homedir(), '.project-ads', 'config.json')
-const WALLET = join(homedir(), '.project-ads', 'wallet.json')
+const SERVER = process.env.ADLINE_URL_BASE ?? 'https://adline.fly.dev'
+const CONFIG = join(homedir(), '.adline', 'config.json')
+const WALLET = join(homedir(), '.adline', 'wallet.json')
 
 function readJson(path: string): Record<string, unknown> {
   try {
@@ -23,17 +23,17 @@ function publisherToken(): string | null {
   return typeof token === 'string' ? token : null
 }
 
-const server = new McpServer({ name: 'project-ads', version: '0.1.0' })
+const server = new McpServer({ name: 'adline', version: '0.1.0' })
 
 server.tool(
   'get_earnings',
-  'Get your project-ads publisher earnings: total credits, impression count, and daily breakdown from the server ledger.',
+  'Get your Adline publisher earnings: total credits, impression count, and daily breakdown from the server ledger.',
   {},
   async () => {
     const token = publisherToken()
     if (!token) {
       return {
-        content: [{ type: 'text' as const, text: 'Not registered. Run: npx @project-ads/setup' }],
+        content: [{ type: 'text' as const, text: 'Not registered. Run: npx @adline/setup' }],
       }
     }
 
@@ -55,7 +55,7 @@ server.tool(
 
 server.tool(
   'get_local_wallet',
-  'Read the local offline wallet cache (~/.project-ads/wallet.json). May lag behind the server ledger.',
+  'Read the local offline wallet cache (~/.adline/wallet.json). May lag behind the server ledger.',
   {},
   async () => {
     const wallet = readJson(WALLET)
@@ -71,7 +71,7 @@ server.tool(
     const token = publisherToken()
     if (!token) {
       return {
-        content: [{ type: 'text' as const, text: 'Not registered. Run: npx @project-ads/setup' }],
+        content: [{ type: 'text' as const, text: 'Not registered. Run: npx @adline/setup' }],
       }
     }
 

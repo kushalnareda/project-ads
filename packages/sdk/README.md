@@ -1,17 +1,17 @@
-# @project-ads/agent-ads
+# @adline/agent-ads
 
 Programmatic ad SDK for AI agent wait states. Show one sponsored line when your tool hits a rate limit or long run — developer earns credits, you earn revenue.
 
 ## Install
 
 ```sh
-npm install @project-ads/agent-ads
+npm install @adline/agent-ads
 ```
 
 ## Usage
 
 ```typescript
-import { showAd } from '@project-ads/agent-ads'
+import { showAd } from '@adline/agent-ads'
 
 // Call once per wait state (rate limit, long run, spinner)
 const result = await showAd({ surface: 'rate-limit' })
@@ -22,9 +22,9 @@ const result = await showAd({ surface: 'rate-limit' })
 
 ## What it does
 
-- Fetches a sponsored message from `api.project-ads.com`
+- Fetches a sponsored message from `api.adline.com`
 - Prints `[ad] <text> → <url>` to stderr (TTY only)
-- Increments a local credit counter at `~/.project-ads/wallet.json`
+- Increments a local credit counter at `~/.adline/wallet.json`
 - Returns in ≤ 2s (hard timeout)
 
 ## Limits

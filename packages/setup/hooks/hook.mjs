@@ -4,11 +4,11 @@ import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
-const DIR         = join(homedir(), '.project-ads')
+const DIR         = join(homedir(), '.adline')
 const CONFIG      = join(DIR, 'config.json')
 const WALLET      = join(DIR, 'wallet.json')
 const RATE_FILE   = join(DIR, '.last-impression')
-const AD_URL      = process.env.PROJECT_ADS_URL ?? 'https://project-ads.fly.dev/v1/impression'
+const AD_URL      = process.env.ADLINE_URL ?? 'https://adline.fly.dev/v1/impression'
 const RATE_MS     = 5_000
 
 function readJson(path, fallback) {

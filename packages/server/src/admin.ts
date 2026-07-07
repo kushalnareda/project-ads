@@ -6,7 +6,7 @@ export const ADMIN_HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>project-ads · admin</title>
+<title>Adline · admin</title>
 <style>
   :root { color-scheme: dark; }
   * { margin: 0; box-sizing: border-box; }
@@ -34,7 +34,7 @@ export const ADMIN_HTML = `<!doctype html>
 </style>
 </head>
 <body>
-<h1>📢 project-ads</h1>
+<h1>📢 Adline</h1>
 <div class="sub">admin console</div>
 
 <div class="card" id="login">

@@ -7,13 +7,13 @@ import { execSync } from 'child_process'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-const SERVER   = process.env.PROJECT_ADS_URL_BASE ?? 'https://project-ads.fly.dev'
+const SERVER   = process.env.ADLINE_URL_BASE ?? 'https://adline.fly.dev'
 const HOME     = homedir()
-const ADS_DIR  = join(HOME, '.project-ads')
+const ADS_DIR  = join(HOME, '.adline')
 const CONFIG   = join(ADS_DIR, 'config.json')
 const HOOK     = join(ADS_DIR, 'hook.mjs')
 const TOKEN_SERVER = join(ADS_DIR, 'token-server.mjs')
-const SL_HOOK  = join(HOME, '.claude', 'hooks', 'project-ads-statusline.mjs')
+const SL_HOOK  = join(HOME, '.claude', 'hooks', 'adline-statusline.mjs')
 const SETTINGS = join(HOME, '.claude', 'settings.json')
 
 const HOOK_SRC         = join(__dirname, '..', 'hooks', 'hook.mjs')
@@ -21,7 +21,7 @@ const SL_SRC           = join(__dirname, '..', 'hooks', 'statusline.mjs')
 const TOKEN_SERVER_SRC = join(__dirname, '..', 'hooks', 'token-server.mjs')
 
 async function main() {
-  console.log('project-ads setup\n')
+  console.log('Adline setup\n')
 
   const email = await prompt('Email: ')
   if (!email.includes('@')) {
@@ -70,20 +70,20 @@ async function main() {
 function installTokenServer() {
   if (platform() !== 'darwin') {
     // LaunchAgent only on macOS; other platforms need manual startup
-    console.log('ℹ  Token server: run `node ~/.project-ads/token-server.mjs` to enable dashboard auto-login')
+    console.log('ℹ  Token server: run `node ~/.adline/token-server.mjs` to enable dashboard auto-login')
     return
   }
 
   const nodePath = process.execPath
   const launchAgentsDir = join(HOME, 'Library', 'LaunchAgents')
-  const plistPath = join(launchAgentsDir, 'com.project-ads.token-server.plist')
+  const plistPath = join(launchAgentsDir, 'com.adline.token-server.plist')
 
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.project-ads.token-server</string>
+  <string>com.adline.token-server</string>
   <key>ProgramArguments</key>
   <array>
     <string>${nodePath}</string>
@@ -123,10 +123,12 @@ function wireSettings() {
   if (!settings.hooks) settings.hooks = {}
   const hooks = settings.hooks as Record<string, unknown[]>
 
-  // Remove legacy hook.js entries
+  // Remove any legacy pre-rename entries: the original `project-ads-hook.js`,
+  // the `~/.project-ads/*` hooks, and the old `project-ads-statusline.mjs`.
+  // Matching the old brand string covers all of them so a re-run migrates clean.
   for (const event of Object.keys(hooks)) {
     hooks[event] = (hooks[event] as any[]).filter(
-      (g) => !g.hooks?.some((h: any) => h.command?.includes('project-ads-hook.js')),
+      (g) => !g.hooks?.some((h: any) => h.command?.includes('project-ads')),
     )
   }
 

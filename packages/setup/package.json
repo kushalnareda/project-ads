@@ -1,13 +1,13 @@
 {
-  "name": "@project-ads/setup",
+  "name": "@adline/setup",
   "version": "0.1.0",
-  "description": "Install project-ads for Claude Code",
+  "description": "Install Adline for Claude Code",
   "type": "module",
   "engines": {
     "node": ">=18"
   },
   "bin": {
-    "project-ads-setup": "./dist/cli.js"
+    "adline-setup": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsup",

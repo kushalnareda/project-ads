@@ -1,4 +1,4 @@
-# project-ads
+# Adline
 
 **The ad network built for AI coding tools.**
 
@@ -24,12 +24,12 @@ To advertise: email [kushalsinghnareda@gmail.com](mailto:kushalsinghnareda@gmail
 Earn credits on every Claude Code session.
 
 ```bash
-npx @project-ads/setup
+npx @adline/setup
 ```
 
 One command. Registers your account, wires hooks into Claude Code, starts earning immediately.
 
-**Earnings:** 70% of CPM revenue, credited per impression to `~/.project-ads/wallet.json`.
+**Earnings:** 70% of CPM revenue, credited per impression to `~/.adline/wallet.json`.
 
 **Privacy:** no prompts, completions, or code ever leave your machine. Only the surface name is sent to log the impression.
 
@@ -37,14 +37,14 @@ One command. Registers your account, wires hooks into Claude Code, starts earnin
 
 ## SDK (for AI tool builders)
 
-Integrate project-ads into your own AI tool:
+Integrate Adline into your own AI tool:
 
 ```bash
-npm install @project-ads/agent-ads
+npm install @adline/agent-ads
 ```
 
 ```ts
-import { showAd } from '@project-ads/agent-ads'
+import { showAd } from '@adline/agent-ads'
 
 // Call during AI wait states — never rejects, graceful fallback
 await showAd({ surface: 'claude-code-spinner' })
@@ -60,10 +60,10 @@ Rate limiting is layered: the SDK enforces a 5-second minimum between ads **per 
 
 | Package | Description |
 |---|---|
-| `@project-ads/agent-ads` | SDK — call `showAd()` from any AI tool |
-| `@project-ads/setup` | Publisher onboarding CLI |
+| `@adline/agent-ads` | SDK — call `showAd()` from any AI tool |
+| `@adline/setup` | Publisher onboarding CLI |
 | `packages/server` | Ad server (Hono + Cloudflare R2, Fly.io) |
 
 ---
 
-© 2026 project-ads. All rights reserved.
+© 2026 Adline. All rights reserved.
