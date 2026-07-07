@@ -1,5 +1,7 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
 import { config } from './config.js'
+import { withLock } from './locks.js'
+import { log } from './logger.js'
 
 const client = new S3Client({
   region: 'auto',
@@ -111,20 +113,24 @@ export async function upsertCampaign(campaign: Campaign): Promise<void> {
 
 export async function incrementCampaignSpend(id: string, deltaCents: number): Promise<void> {
   const key = `campaigns/${id}.json`
-  try {
-    const res = await client.send(new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }))
-    const body = await res.Body!.transformToString()
-    const campaign = JSON.parse(body) as Campaign
-    campaign.spent_cents = (campaign.spent_cents ?? 0) + deltaCents
-    await client.send(new PutObjectCommand({
-      Bucket: config.r2.bucket,
-      Key: key,
-      Body: JSON.stringify(campaign),
-      ContentType: 'application/json',
-    }))
-  } catch (err) {
-    console.error('[r2] incrementCampaignSpend failed:', err instanceof Error ? err.message : err)
-  }
+  // Serialized per campaign: concurrent impressions would otherwise interleave
+  // the get→put below and drop spend, letting campaigns run past budget.
+  await withLock(key, async () => {
+    try {
+      const res = await client.send(new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }))
+      const body = await res.Body!.transformToString()
+      const campaign = JSON.parse(body) as Campaign
+      campaign.spent_cents = (campaign.spent_cents ?? 0) + deltaCents
+      await client.send(new PutObjectCommand({
+        Bucket: config.r2.bucket,
+        Key: key,
+        Body: JSON.stringify(campaign),
+        ContentType: 'application/json',
+      }))
+    } catch (err) {
+      log.error('r2.spend_update_failed', err, { campaign_id: id, delta_cents: deltaCents })
+    }
+  })
 }
 
 export interface Ledger {
@@ -150,34 +156,40 @@ export async function getLedger(publisherToken: string): Promise<Ledger | null> 
 
 export async function creditLedger(publisherToken: string, creditsDelta: number, timestamp: string): Promise<void> {
   const key = `ledgers/${publisherToken}.json`
-  try {
-    const existing = await getLedger(publisherToken)
-    const ledger: Ledger = existing ?? {
-      publisher_token: publisherToken,
-      total_credits: 0,
-      total_impressions: 0,
-      daily: {},
-      updated_at: timestamp,
+  // Serialized per publisher: this is the money path — a lost get→put
+  // interleave here silently underpays the publisher.
+  await withLock(key, async () => {
+    try {
+      const existing = await getLedger(publisherToken)
+      const ledger: Ledger = existing ?? {
+        publisher_token: publisherToken,
+        total_credits: 0,
+        total_impressions: 0,
+        daily: {},
+        updated_at: timestamp,
+      }
+
+      const day = timestamp.slice(0, 10)
+      const dayEntry = ledger.daily[day] ?? { credits: 0, impressions: 0 }
+      dayEntry.credits += creditsDelta
+      dayEntry.impressions += 1
+      ledger.daily[day] = dayEntry
+      ledger.total_credits += creditsDelta
+      ledger.total_impressions += 1
+      ledger.updated_at = timestamp
+
+      await client.send(new PutObjectCommand({
+        Bucket: config.r2.bucket,
+        Key: key,
+        Body: JSON.stringify(ledger),
+        ContentType: 'application/json',
+      }))
+    } catch (err) {
+      // Impression objects are the source of truth; a lost ledger update is
+      // recoverable by replaying impressions/, so log loudly but don't throw.
+      log.error('r2.ledger_credit_failed', err, { publisher_token: publisherToken, credits_delta: creditsDelta })
     }
-
-    const day = timestamp.slice(0, 10)
-    const dayEntry = ledger.daily[day] ?? { credits: 0, impressions: 0 }
-    dayEntry.credits += creditsDelta
-    dayEntry.impressions += 1
-    ledger.daily[day] = dayEntry
-    ledger.total_credits += creditsDelta
-    ledger.total_impressions += 1
-    ledger.updated_at = timestamp
-
-    await client.send(new PutObjectCommand({
-      Bucket: config.r2.bucket,
-      Key: key,
-      Body: JSON.stringify(ledger),
-      ContentType: 'application/json',
-    }))
-  } catch (err) {
-    console.error('[r2] creditLedger failed:', err instanceof Error ? err.message : err)
-  }
+  })
 }
 
 export interface Payout {
@@ -279,6 +291,6 @@ export async function logImpression(impression: Impression): Promise<void> {
     }))
   } catch (err) {
     // Log server-side but don't fail the impression response
-    console.error('[r2] write failed:', err instanceof Error ? err.message : err)
+    log.error('r2.impression_write_failed', err, { campaign_id: (impression as { campaign_id?: string }).campaign_id, surface: impression.surface })
   }
 }

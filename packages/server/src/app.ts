@@ -1,8 +1,41 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
+import { timingSafeEqual } from 'node:crypto'
 import { config } from './config.js'
 import { listCampaigns, logImpression, registerPublisher, upsertCampaign, incrementCampaignSpend, creditLedger, getLedger, listLedgers, listPublishers, getPayouts, recordPayout, type Campaign, type Payout } from './r2.js'
+import { allow } from './ratelimit.js'
+import { isPublisherToken, isUuid, isValidAdUrl, isValidEmail, isIsoDate, sanitizeAdText, AD_TEXT_MAX } from './validate.js'
+import { log } from './logger.js'
 
 const app = new Hono()
+
+// Surface 5xx responses in structured logs; individual handlers already log
+// their own failure detail.
+app.use('*', async (c, next) => {
+  await next()
+  if (c.res.status >= 500) {
+    log.error('http.5xx', undefined, { method: c.req.method, path: c.req.path, status: c.res.status })
+  }
+})
+
+// Constant-time admin auth — a plain === leaks token prefixes through timing.
+function isAdmin(c: Context): boolean {
+  const given = c.req.header('x-admin-token') ?? ''
+  const a = Buffer.from(given)
+  const b = Buffer.from(config.adminToken)
+  return a.length === b.length && timingSafeEqual(a, b)
+}
+
+function clientIp(c: Context): string {
+  // Fly terminates TLS and sets Fly-Client-IP; X-Forwarded-For as fallback.
+  return c.req.header('fly-client-ip')
+    ?? c.req.header('x-forwarded-for')?.split(',')[0]?.trim()
+    ?? 'unknown'
+}
+
+// Hooks fire at most every 5s per process (12/min); generous headroom for
+// parallel CI agents sharing one token or NAT'd IP.
+const IMPRESSION_LIMIT = { limit: 60, windowMs: 60_000 }
+const REGISTER_LIMIT = { limit: 10, windowMs: 3_600_000 }
 
 // Fraction of full CPM value each surface earns for publisher
 const SURFACE_FRACTION: Record<string, number> = {
@@ -24,7 +57,7 @@ async function selectCampaign(surface: string): Promise<{ campaign: Campaign; cr
       const campaigns = await listCampaigns()
       campaignCache = { data: campaigns, expires: now + 60_000 }
     } catch (err) {
-      console.error('[campaigns] list failed:', err instanceof Error ? err.message : err)
+      log.error('campaigns.list_failed', err)
       if (!campaignCache) {
         // No stale cache — fall through to default ad check below
         campaignCache = { data: [], expires: 0 }
@@ -79,8 +112,19 @@ app.post('/v1/impression', async (c) => {
     return c.json({ error: 'invalid JSON' }, 400)
   }
 
-  if (typeof body.surface !== 'string' || !body.surface) {
+  if (typeof body.surface !== 'string' || !body.surface || body.surface.length > 64) {
     return c.json({ error: 'surface is required' }, 400)
+  }
+
+  // Tokens are server-issued UUIDs and become R2 object keys — anything else
+  // is either a misconfigured publisher or a key-traversal attempt.
+  const publisherToken = isPublisherToken(body.publisher_token) ? body.publisher_token : null
+  if (body.publisher_token != null && !publisherToken) {
+    return c.json({ error: 'invalid publisher_token' }, 400)
+  }
+
+  if (!allow(`imp:${publisherToken ?? `ip:${clientIp(c)}`}`, IMPRESSION_LIMIT)) {
+    return c.json({ error: 'rate limited' }, 429)
   }
 
   const surface = body.surface
@@ -94,23 +138,28 @@ app.post('/v1/impression', async (c) => {
   const { campaign, credits_delta } = result
   const costCents = campaign.cpm_cents / 1000
 
+  // Sanitize at serve time too: covers campaigns written before validation
+  // existed and the env-var default ad. This text lands in raw terminals.
+  const adText = sanitizeAdText(campaign.ad_text)
+
   const impression = {
     campaign_id: campaign.id,
     surface,
     sdk_version: typeof body.sdk_version === 'string' ? body.sdk_version : 'unknown',
-    ad_text: campaign.ad_text,
+    ad_text: adText,
     url: campaign.url,
     credits_delta,
     cost_cents: costCents,
     timestamp: new Date().toISOString(),
     tool: 'claude-code',
-    publisher_token: typeof body.publisher_token === 'string' ? body.publisher_token : null,
+    publisher_token: publisherToken,
   }
 
   // Fire-and-forget: log impression + update spend + credit ledger concurrently, don't block response
   void Promise.all([
     logImpression(impression),
-    incrementCampaignSpend(campaign.id, costCents),
+    // Default (env-var) ad has no stored campaign object and costs nothing
+    campaign.id !== 'default' ? incrementCampaignSpend(campaign.id, costCents) : Promise.resolve(),
     impression.publisher_token
       ? creditLedger(impression.publisher_token, credits_delta, impression.timestamp)
       : Promise.resolve(),
@@ -122,7 +171,7 @@ app.post('/v1/impression', async (c) => {
     if (cached) cached.spent_cents += costCents
   }
 
-  return c.json({ ad_text: campaign.ad_text, url: campaign.url, credits_delta })
+  return c.json({ ad_text: adText, url: campaign.url, credits_delta })
 })
 
 app.post('/v1/publisher/register', async (c) => {
@@ -133,15 +182,19 @@ app.post('/v1/publisher/register', async (c) => {
     return c.json({ error: 'invalid JSON' }, 400)
   }
 
-  if (typeof body.email !== 'string' || !body.email.includes('@')) {
+  if (!isValidEmail(body.email)) {
     return c.json({ error: 'valid email is required' }, 400)
+  }
+
+  if (!allow(`reg:${clientIp(c)}`, REGISTER_LIMIT)) {
+    return c.json({ error: 'rate limited' }, 429)
   }
 
   try {
     const publisher = await registerPublisher(body.email)
     return c.json({ token: publisher.token, registered_at: publisher.registered_at })
   } catch (err) {
-    console.error('[register]', err instanceof Error ? err.message : err)
+    log.error('register.failed', err)
     return c.json({ error: 'registration failed' }, 500)
   }
 })
@@ -149,7 +202,7 @@ app.post('/v1/publisher/register', async (c) => {
 // Admin: create or update a campaign
 // Protected by ADMIN_TOKEN header
 app.post('/v1/admin/campaign', async (c) => {
-  if (c.req.header('x-admin-token') !== config.adminToken) {
+  if (!isAdmin(c)) {
     return c.json({ error: 'unauthorized' }, 401)
   }
 
@@ -172,10 +225,31 @@ app.post('/v1/admin/campaign', async (c) => {
     return c.json({ error: 'missing required fields: ad_text, url, advertiser_name, budget_cents, cpm_cents, starts_at, ends_at' }, 400)
   }
 
+  const adText = sanitizeAdText(body.ad_text)
+  if (!adText) {
+    return c.json({ error: `ad_text must contain printable text (max ${AD_TEXT_MAX} chars)` }, 400)
+  }
+  if (!isValidAdUrl(body.url)) {
+    return c.json({ error: 'url must be a valid http(s) URL' }, 400)
+  }
+  if (!body.advertiser_name.trim() || body.advertiser_name.length > 100) {
+    return c.json({ error: 'advertiser_name must be 1–100 chars' }, 400)
+  }
+  if (!Number.isFinite(body.budget_cents) || body.budget_cents <= 0 || !Number.isFinite(body.cpm_cents) || body.cpm_cents <= 0) {
+    return c.json({ error: 'budget_cents and cpm_cents must be positive numbers' }, 400)
+  }
+  if (!isIsoDate(body.starts_at) || !isIsoDate(body.ends_at) || body.ends_at <= body.starts_at) {
+    return c.json({ error: 'starts_at and ends_at must be ISO dates with ends_at after starts_at' }, 400)
+  }
+  // id becomes an R2 object key — restrict to server-generated UUID shape.
+  if (body.id !== undefined && !isUuid(body.id)) {
+    return c.json({ error: 'id must be a UUID' }, 400)
+  }
+
   const campaign: Campaign = {
     id: body.id ?? crypto.randomUUID(),
-    advertiser_name: body.advertiser_name,
-    ad_text: body.ad_text,
+    advertiser_name: body.advertiser_name.trim(),
+    ad_text: adText,
     url: body.url,
     budget_cents: body.budget_cents,
     spent_cents: body.spent_cents ?? 0,
@@ -192,14 +266,14 @@ app.post('/v1/admin/campaign', async (c) => {
     campaignCache = null
     return c.json({ campaign })
   } catch (err) {
-    console.error('[admin/campaign]', err instanceof Error ? err.message : err)
+    log.error('admin.campaign_save_failed', err)
     return c.json({ error: 'failed to save campaign' }, 500)
   }
 })
 
 // Admin: list all campaigns (for dashboard)
 app.get('/v1/admin/campaigns', async (c) => {
-  if (c.req.header('x-admin-token') !== config.adminToken) {
+  if (!isAdmin(c)) {
     return c.json({ error: 'unauthorized' }, 401)
   }
 
@@ -207,7 +281,7 @@ app.get('/v1/admin/campaigns', async (c) => {
     const campaigns = await listCampaigns()
     return c.json({ campaigns })
   } catch (err) {
-    console.error('[admin/campaigns]', err instanceof Error ? err.message : err)
+    log.error('admin.campaigns_list_failed', err)
     return c.json({ error: 'failed to list campaigns' }, 500)
   }
 })
@@ -220,7 +294,7 @@ app.get('/v1/publisher/earnings', async (c) => {
   const auth = c.req.header('authorization')
   const token = auth?.startsWith('Bearer ') ? auth.slice(7) : c.req.query('token')
 
-  if (!token) {
+  if (!isPublisherToken(token)) {
     return c.json({ error: 'publisher token required (Authorization: Bearer <token>)' }, 401)
   }
 
@@ -239,14 +313,14 @@ app.get('/v1/publisher/earnings', async (c) => {
       updated_at: ledger?.updated_at ?? null,
     })
   } catch (err) {
-    console.error('[earnings]', err instanceof Error ? err.message : err)
+    log.error('earnings.load_failed', err)
     return c.json({ error: 'failed to load earnings' }, 500)
   }
 })
 
 // Admin: list publishers with unpaid balance ≥ PAYOUT_MIN (with email so you can pay them)
 app.get('/v1/admin/payouts/due', async (c) => {
-  if (c.req.header('x-admin-token') !== config.adminToken) {
+  if (!isAdmin(c)) {
     return c.json({ error: 'unauthorized' }, 401)
   }
 
@@ -276,14 +350,14 @@ app.get('/v1/admin/payouts/due', async (c) => {
       all: due.sort((a, b) => b.unpaid_credits - a.unpaid_credits),
     })
   } catch (err) {
-    console.error('[admin/payouts/due]', err instanceof Error ? err.message : err)
+    log.error('admin.payouts_due_failed', err)
     return c.json({ error: 'failed to compute payouts due' }, 500)
   }
 })
 
 // Admin: record a payout after paying a publisher externally (Stripe/bank/PayPal/manual)
 app.post('/v1/admin/payouts', async (c) => {
-  if (c.req.header('x-admin-token') !== config.adminToken) {
+  if (!isAdmin(c)) {
     return c.json({ error: 'unauthorized' }, 401)
   }
 
@@ -295,16 +369,26 @@ app.post('/v1/admin/payouts', async (c) => {
   }
 
   if (
-    typeof body.publisher_token !== 'string' || !body.publisher_token ||
-    typeof body.amount !== 'number' || body.amount <= 0 ||
+    !isPublisherToken(body.publisher_token) ||
+    typeof body.amount !== 'number' || !Number.isFinite(body.amount) || body.amount <= 0 ||
     typeof body.method !== 'string' || !body.method
   ) {
-    return c.json({ error: 'required: publisher_token (string), amount (number > 0), method (string); optional: reference' }, 400)
+    return c.json({ error: 'required: publisher_token (uuid), amount (number > 0), method (string); optional: reference' }, 400)
   }
 
   try {
-    // Guard against overpaying: amount must not exceed unpaid balance
     const [ledger, payouts] = await Promise.all([getLedger(body.publisher_token), getPayouts(body.publisher_token)])
+
+    // Idempotency: replaying the same external payment reference must not
+    // double-record. Callers should pass the Stripe/PayPal/bank reference.
+    if (typeof body.reference === 'string' && body.reference) {
+      const existing = payouts.find(p => p.reference === body.reference)
+      if (existing) {
+        return c.json({ payout: existing, idempotent: true })
+      }
+    }
+
+    // Guard against overpaying: amount must not exceed unpaid balance
     const paid = payouts.reduce((sum, p) => sum + p.amount, 0)
     const unpaid = (ledger?.total_credits ?? 0) - paid
     if (body.amount > unpaid + 1e-9) {
@@ -321,7 +405,7 @@ app.post('/v1/admin/payouts', async (c) => {
     await recordPayout(payout)
     return c.json({ payout, remaining_unpaid: unpaid - body.amount })
   } catch (err) {
-    console.error('[admin/payouts]', err instanceof Error ? err.message : err)
+    log.error('admin.payout_record_failed', err)
     return c.json({ error: 'failed to record payout' }, 500)
   }
 })
