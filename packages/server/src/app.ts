@@ -1,11 +1,12 @@
 import { Hono, type Context } from 'hono'
 import { timingSafeEqual } from 'node:crypto'
 import { config } from './config.js'
-import { listCampaigns, logImpression, registerPublisher, upsertCampaign, incrementCampaignSpend, creditLedger, getLedger, listLedgers, listPublishers, getPayouts, recordPayout, type Campaign, type Payout } from './r2.js'
+import { listCampaigns, logImpression, registerPublisher, upsertCampaign, incrementCampaignSpend, creditLedger, getLedger, listLedgers, listPublishers, getPayouts, recordPayout, getAdminStats, type Campaign, type Payout } from './r2.js'
 import { allow } from './ratelimit.js'
 import { isPublisherToken, isUuid, isValidAdUrl, isValidEmail, isIsoDate, sanitizeAdText, AD_TEXT_MAX } from './validate.js'
 import { log } from './logger.js'
 import { ADMIN_HTML } from './admin.js'
+import { STATS_HTML } from './stats.js'
 
 const app = new Hono()
 
@@ -420,6 +421,47 @@ app.post('/v1/admin/payouts', async (c) => {
     return c.json({ error: 'failed to record payout' }, 500)
   }
 })
+
+// Public network stats — 60s cache, no auth required
+let publicStatsCache: { data: object; expires: number } | null = null
+
+app.get('/v1/stats', async (c) => {
+  const now = Date.now()
+  if (publicStatsCache && now < publicStatsCache.expires) {
+    return c.json(publicStatsCache.data)
+  }
+  try {
+    const s = await getAdminStats()
+    const data = {
+      publishers: s.publishers.total,
+      activated: s.publishers.activated,
+      new_last_7_days: s.publishers.new_last_7_days,
+      impressions: s.impressions.total,
+      impressions_last_7_days: s.impressions.last_7_days,
+      credits_distributed: s.credits.total_earned,
+      active_campaigns: s.campaigns.active,
+      daily_impressions: s.impressions.daily,
+      as_of: s.computed_at,
+    }
+    publicStatsCache = { data, expires: now + 60_000 }
+    return c.json(data)
+  } catch (err) {
+    log.error('stats.public_failed', err)
+    return c.json({ error: 'stats unavailable' }, 500)
+  }
+})
+
+app.get('/v1/admin/stats', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'unauthorized' }, 401)
+  try {
+    return c.json(await getAdminStats())
+  } catch (err) {
+    log.error('admin.stats_failed', err)
+    return c.json({ error: 'failed to compute stats' }, 500)
+  }
+})
+
+app.get('/stats', (c) => c.html(STATS_HTML))
 
 // Publisher dashboard — static HTML, fetches earnings client-side
 app.get('/dashboard', (c) => c.html(DASHBOARD_HTML))

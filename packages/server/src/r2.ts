@@ -275,6 +275,99 @@ export async function recordPayout(payout: Payout): Promise<void> {
   }))
 }
 
+export interface AdminStats {
+  publishers: { total: number; activated: number; new_last_7_days: number }
+  impressions: { total: number; last_7_days: number; daily: Record<string, number> }
+  credits: { total_earned: number; total_paid: number; unpaid: number }
+  campaigns: { total: number; active: number; total_spend_cents: number }
+  top_publishers: Array<{ token_prefix: string; credits: number; impressions: number }>
+  computed_at: string
+}
+
+export async function getAdminStats(): Promise<AdminStats> {
+  const [publishers, ledgers, campaigns] = await Promise.all([
+    listPublishers(),
+    listLedgers(),
+    listCampaigns(),
+  ])
+
+  const now = Date.now()
+  const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const thirtyDaysAgo = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+
+  const dailyImpressions: Record<string, number> = {}
+  let totalImpressions = 0
+  let totalCredits = 0
+  const topMap = new Map<string, { credits: number; impressions: number }>()
+
+  for (const ledger of ledgers) {
+    totalImpressions += ledger.total_impressions
+    totalCredits += ledger.total_credits
+    topMap.set(ledger.publisher_token, { credits: ledger.total_credits, impressions: ledger.total_impressions })
+    for (const [day, v] of Object.entries(ledger.daily)) {
+      if (day >= thirtyDaysAgo) {
+        dailyImpressions[day] = (dailyImpressions[day] ?? 0) + v.impressions
+      }
+    }
+  }
+
+  const last7DaysImpressions = Object.entries(dailyImpressions)
+    .filter(([day]) => day >= sevenDaysAgo)
+    .reduce((sum, [, v]) => sum + v, 0)
+
+  let totalPaid = 0
+  try {
+    const list = await client.send(new ListObjectsV2Command({ Bucket: config.r2.bucket, Prefix: 'payouts/' }))
+    const keys = (list.Contents ?? []).map(o => o.Key!).filter(k => k.endsWith('.json'))
+    if (keys.length > 0) {
+      const results = await Promise.allSettled(
+        keys.map(async key => {
+          const res = await client.send(new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }))
+          return JSON.parse(await res.Body!.transformToString()) as Payout
+        })
+      )
+      totalPaid = results
+        .filter((r): r is PromiseFulfilledResult<Payout> => r.status === 'fulfilled')
+        .reduce((sum, r) => sum + r.value.amount, 0)
+    }
+  } catch {}
+
+  const nowIso = new Date().toISOString()
+  const activeCampaigns = campaigns.filter(c =>
+    c.active && c.starts_at <= nowIso && c.ends_at >= nowIso && c.spent_cents < c.budget_cents
+  )
+
+  const topPublishers = Array.from(topMap.entries())
+    .sort((a, b) => b[1].credits - a[1].credits)
+    .slice(0, 10)
+    .map(([token, v]) => ({ token_prefix: token.slice(0, 8), credits: v.credits, impressions: v.impressions }))
+
+  return {
+    publishers: {
+      total: publishers.length,
+      activated: topMap.size,
+      new_last_7_days: publishers.filter(p => p.registered_at.slice(0, 10) >= sevenDaysAgo).length,
+    },
+    impressions: {
+      total: totalImpressions,
+      last_7_days: last7DaysImpressions,
+      daily: dailyImpressions,
+    },
+    credits: {
+      total_earned: totalCredits,
+      total_paid: totalPaid,
+      unpaid: Math.max(0, totalCredits - totalPaid),
+    },
+    campaigns: {
+      total: campaigns.length,
+      active: activeCampaigns.length,
+      total_spend_cents: campaigns.reduce((sum, c) => sum + (c.spent_cents ?? 0), 0),
+    },
+    top_publishers: topPublishers,
+    computed_at: new Date().toISOString(),
+  }
+}
+
 export async function logImpression(impression: Impression): Promise<void> {
   const d = new Date(impression.timestamp)
   const year = d.getUTCFullYear()
