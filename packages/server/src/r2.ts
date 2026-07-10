@@ -12,6 +12,8 @@ const client = new S3Client({
   },
 })
 
+export type CampaignStatus = 'pending' | 'active' | 'paused' | 'rejected'
+
 export interface Campaign {
   id: string
   advertiser_name: string
@@ -20,10 +22,36 @@ export interface Campaign {
   budget_cents: number   // total budget in cents
   spent_cents: number    // running spend (eventual consistency at MVP scale)
   cpm_cents: number      // advertiser pays per 1000 impressions, in cents
-  active: boolean
+  active: boolean        // legacy mirror of status === 'active'; kept one release for rollback
+  status: CampaignStatus
+  advertiser_token: string | null   // null = maintainer-created
+  requested_budget_cents?: number   // advertiser's intent at create; funded budget set at approval
+  rejection_reason?: string
+  daily: Record<string, { impressions: number; spent_cents: number }>
   starts_at: string      // ISO
   ends_at: string        // ISO
   created_at: string
+}
+
+// Conflict rule for the active→status migration: status wins on read when both
+// exist; legacy objects without status derive it from active. active is
+// re-written as status === 'active' on every save (dual-write, one release).
+export function normalizeCampaign(raw: Partial<Campaign> & { id: string }): Campaign {
+  const status: CampaignStatus = raw.status ?? ((raw.active ?? true) ? 'active' : 'paused')
+  return {
+    ...raw,
+    status,
+    active: status === 'active',
+    advertiser_token: raw.advertiser_token ?? null,
+    daily: raw.daily ?? {},
+  } as Campaign
+}
+
+export interface Advertiser {
+  email: string
+  company_name: string
+  token: string
+  registered_at: string
 }
 
 export interface Impression {
@@ -106,6 +134,76 @@ export async function registerPublisher(email: string, profile: PublisherProfile
   return publisher
 }
 
+// Generic prefix scan: list keys, fetch each JSON object, skip failures.
+// New code uses this; migrating the six older copies of the idiom is a TODO.
+async function listJson<T>(prefix: string): Promise<T[]> {
+  const list = await client.send(new ListObjectsV2Command({
+    Bucket: config.r2.bucket,
+    Prefix: prefix,
+  }))
+
+  const keys = (list.Contents ?? []).map(o => o.Key!).filter(k => k.endsWith('.json'))
+  if (keys.length === 0) return []
+
+  const results = await Promise.allSettled(
+    keys.map(async (key): Promise<T> => {
+      const res = await client.send(new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }))
+      return JSON.parse(await res.Body!.transformToString()) as T
+    })
+  )
+
+  return results
+    .filter((r): r is PromiseFulfilledResult<Awaited<T>> => r.status === 'fulfilled')
+    .map(r => r.value)
+}
+
+export async function registerAdvertiser(email: string, companyName: string): Promise<{ advertiser: Advertiser; existing: boolean }> {
+  const hash = await sha256hex(email.toLowerCase().trim())
+  const key = `advertisers/${hash}.json`
+
+  try {
+    const res = await client.send(new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }))
+    const advertiser = JSON.parse(await res.Body!.transformToString()) as Advertiser
+    // Existing email: caller must NOT return the token — anyone who knows a
+    // public advertiser email could otherwise hijack the portal.
+    return { advertiser, existing: true }
+  } catch (err: any) {
+    const code = err?.Code ?? err?.code ?? err?.name
+    if (code !== 'NoSuchKey') throw err
+  }
+
+  const advertiser: Advertiser = {
+    email,
+    company_name: companyName,
+    token: crypto.randomUUID(),
+    registered_at: new Date().toISOString(),
+  }
+
+  await client.send(new PutObjectCommand({
+    Bucket: config.r2.bucket,
+    Key: key,
+    Body: JSON.stringify(advertiser),
+    ContentType: 'application/json',
+  }))
+
+  return { advertiser, existing: false }
+}
+
+export async function listAdvertisers(): Promise<Advertiser[]> {
+  return listJson<Advertiser>('advertisers/')
+}
+
+export async function getCampaign(id: string): Promise<Campaign | null> {
+  try {
+    const res = await client.send(new GetObjectCommand({ Bucket: config.r2.bucket, Key: `campaigns/${id}.json` }))
+    return normalizeCampaign(JSON.parse(await res.Body!.transformToString()))
+  } catch (err: any) {
+    const code = err?.Code ?? err?.code ?? err?.name
+    if (code === 'NoSuchKey') return null
+    throw err
+  }
+}
+
 // Look up a publisher by their token (scans publishers/). Used by earnings +
 // admin joins. Fine at MVP scale; revisit with an index if publisher count grows.
 export async function getPublisherByToken(token: string): Promise<Publisher | null> {
@@ -129,7 +227,7 @@ export async function listCampaigns(): Promise<Campaign[]> {
     keys.map(async key => {
       const res = await client.send(new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }))
       const body = await res.Body!.transformToString()
-      return JSON.parse(body) as Campaign
+      return normalizeCampaign(JSON.parse(body))
     })
   )
 
@@ -139,10 +237,12 @@ export async function listCampaigns(): Promise<Campaign[]> {
 }
 
 export async function upsertCampaign(campaign: Campaign): Promise<void> {
+  // Dual-write: active mirrors status for one release (rollback safety).
+  const normalized = { ...campaign, active: campaign.status === 'active' }
   await client.send(new PutObjectCommand({
     Bucket: config.r2.bucket,
     Key: `campaigns/${campaign.id}.json`,
-    Body: JSON.stringify(campaign),
+    Body: JSON.stringify(normalized),
     ContentType: 'application/json',
   }))
 }
@@ -155,8 +255,23 @@ export async function incrementCampaignSpend(id: string, deltaCents: number): Pr
     try {
       const res = await client.send(new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }))
       const body = await res.Body!.transformToString()
-      const campaign = JSON.parse(body) as Campaign
+      const campaign = normalizeCampaign(JSON.parse(body))
       campaign.spent_cents = (campaign.spent_cents ?? 0) + deltaCents
+
+      // Per-campaign daily counters: true impression counts for the advertiser
+      // dashboard (derived spent/cpm math corrupts under CPM override at approval).
+      const day = new Date().toISOString().slice(0, 10)
+      const entry = campaign.daily[day] ?? { impressions: 0, spent_cents: 0 }
+      entry.impressions += 1
+      entry.spent_cents += deltaCents
+      campaign.daily[day] = entry
+
+      // Bound growth: this object is re-read every 60s by the serving cache.
+      const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+      for (const k of Object.keys(campaign.daily)) {
+        if (k < cutoff) delete campaign.daily[k]
+      }
+
       await client.send(new PutObjectCommand({
         Bucket: config.r2.bucket,
         Key: key,
@@ -309,6 +424,99 @@ export async function recordPayout(payout: Payout): Promise<void> {
     Body: JSON.stringify(payout),
     ContentType: 'application/json',
   }))
+}
+
+export interface AdminStats {
+  publishers: { total: number; activated: number; new_last_7_days: number }
+  impressions: { total: number; last_7_days: number; daily: Record<string, number> }
+  credits: { total_earned: number; total_paid: number; unpaid: number }
+  campaigns: { total: number; active: number; total_spend_cents: number }
+  top_publishers: Array<{ token_prefix: string; credits: number; impressions: number }>
+  computed_at: string
+}
+
+export async function getAdminStats(): Promise<AdminStats> {
+  const [publishers, ledgers, campaigns] = await Promise.all([
+    listPublishers(),
+    listLedgers(),
+    listCampaigns(),
+  ])
+
+  const now = Date.now()
+  const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const thirtyDaysAgo = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+
+  const dailyImpressions: Record<string, number> = {}
+  let totalImpressions = 0
+  let totalCredits = 0
+  const topMap = new Map<string, { credits: number; impressions: number }>()
+
+  for (const ledger of ledgers) {
+    totalImpressions += ledger.total_impressions
+    totalCredits += ledger.total_credits
+    topMap.set(ledger.publisher_token, { credits: ledger.total_credits, impressions: ledger.total_impressions })
+    for (const [day, v] of Object.entries(ledger.daily)) {
+      if (day >= thirtyDaysAgo) {
+        dailyImpressions[day] = (dailyImpressions[day] ?? 0) + v.impressions
+      }
+    }
+  }
+
+  const last7DaysImpressions = Object.entries(dailyImpressions)
+    .filter(([day]) => day >= sevenDaysAgo)
+    .reduce((sum, [, v]) => sum + v, 0)
+
+  let totalPaid = 0
+  try {
+    const list = await client.send(new ListObjectsV2Command({ Bucket: config.r2.bucket, Prefix: 'payouts/' }))
+    const keys = (list.Contents ?? []).map(o => o.Key!).filter(k => k.endsWith('.json'))
+    if (keys.length > 0) {
+      const results = await Promise.allSettled(
+        keys.map(async key => {
+          const res = await client.send(new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }))
+          return JSON.parse(await res.Body!.transformToString()) as Payout
+        })
+      )
+      totalPaid = results
+        .filter((r): r is PromiseFulfilledResult<Payout> => r.status === 'fulfilled')
+        .reduce((sum, r) => sum + r.value.amount, 0)
+    }
+  } catch {}
+
+  const nowIso = new Date().toISOString()
+  const activeCampaigns = campaigns.filter(c =>
+    c.status === 'active' && c.starts_at <= nowIso && c.ends_at >= nowIso && c.spent_cents < c.budget_cents
+  )
+
+  const topPublishers = Array.from(topMap.entries())
+    .sort((a, b) => b[1].credits - a[1].credits)
+    .slice(0, 10)
+    .map(([token, v]) => ({ token_prefix: token.slice(0, 8), credits: v.credits, impressions: v.impressions }))
+
+  return {
+    publishers: {
+      total: publishers.length,
+      activated: topMap.size,
+      new_last_7_days: publishers.filter(p => p.registered_at.slice(0, 10) >= sevenDaysAgo).length,
+    },
+    impressions: {
+      total: totalImpressions,
+      last_7_days: last7DaysImpressions,
+      daily: dailyImpressions,
+    },
+    credits: {
+      total_earned: totalCredits,
+      total_paid: totalPaid,
+      unpaid: Math.max(0, totalCredits - totalPaid),
+    },
+    campaigns: {
+      total: campaigns.length,
+      active: activeCampaigns.length,
+      total_spend_cents: campaigns.reduce((sum, c) => sum + (c.spent_cents ?? 0), 0),
+    },
+    top_publishers: topPublishers,
+    computed_at: new Date().toISOString(),
+  }
 }
 
 // A publisher-initiated cash-out. Created 'pending'; admin resolves to

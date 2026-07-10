@@ -71,4 +71,28 @@ describe('incrementCampaignSpend under concurrency', () => {
     const campaign = JSON.parse(__store.get(`campaigns/${id}.json`))
     expect(campaign.spent_cents).toBe(6)
   })
+
+  it('accumulates daily impression counters under the same lock', async () => {
+    const id = crypto.randomUUID()
+    __store.set(`campaigns/${id}.json`, JSON.stringify({ id, spent_cents: 0 }))
+    await Promise.all([incrementCampaignSpend(id, 1), incrementCampaignSpend(id, 1), incrementCampaignSpend(id, 1)])
+    const campaign = JSON.parse(__store.get(`campaigns/${id}.json`))
+    const today = new Date().toISOString().slice(0, 10)
+    expect(campaign.daily[today].impressions).toBe(3)
+    expect(campaign.daily[today].spent_cents).toBe(3)
+  })
+
+  it('trims daily entries older than 90 days at write time', async () => {
+    const id = crypto.randomUUID()
+    const ancient = '2020-01-01'
+    __store.set(`campaigns/${id}.json`, JSON.stringify({
+      id, spent_cents: 0,
+      daily: { [ancient]: { impressions: 5, spent_cents: 5 } },
+    }))
+    await incrementCampaignSpend(id, 1)
+    const campaign = JSON.parse(__store.get(`campaigns/${id}.json`))
+    expect(campaign.daily[ancient]).toBeUndefined()
+    const today = new Date().toISOString().slice(0, 10)
+    expect(campaign.daily[today].impressions).toBe(1)
+  })
 })
