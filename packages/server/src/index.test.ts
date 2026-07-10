@@ -321,3 +321,219 @@ describe('POST /v1/admin/payouts', () => {
     expect(res.status).toBe(400)
   })
 })
+
+// ---------- Advertiser portal ----------
+
+const ADV_TOKEN = 'aaaaaaaa-1111-4111-8111-111111111111'
+const ADV_TOKEN_B = 'bbbbbbbb-2222-4222-8222-222222222222'
+
+const ADVERTISER_A = { email: 'a@acme.com', company_name: 'Acme', token: ADV_TOKEN, registered_at: '2026-07-01T00:00:00Z' }
+const ADVERTISER_B = { email: 'b@bcorp.com', company_name: 'BCorp', token: ADV_TOKEN_B, registered_at: '2026-07-01T00:00:00Z' }
+
+const CAMP_A_ID = 'cccccccc-0000-4000-8000-000000000001'
+const CAMP_B_ID = 'cccccccc-0000-4000-8000-000000000002'
+
+function mkCampaign(over: Record<string, unknown> = {}) {
+  return {
+    id: CAMP_A_ID, advertiser_name: 'Acme', ad_text: 'Acme ad', url: 'https://acme.example',
+    budget_cents: 10_000, spent_cents: 0, cpm_cents: 500,
+    active: true, status: 'active', advertiser_token: ADV_TOKEN, daily: {},
+    starts_at: '2020-01-01T00:00:00Z', ends_at: '2030-01-01T00:00:00Z', created_at: '',
+    ...over,
+  }
+}
+
+// Dispatch mock: advertisers/ and campaigns/ prefixes both answered
+function mockPortal(campaigns: Record<string, unknown>[], advertisers = [ADVERTISER_A, ADVERTISER_B]) {
+  __send.mockImplementation(async (cmd: any) => {
+    if (cmd.__type === 'List' && cmd.input.Prefix === 'advertisers/') {
+      return { Contents: advertisers.map((_, i) => ({ Key: `advertisers/${i}.json` })) }
+    }
+    if (cmd.__type === 'List' && cmd.input.Prefix === 'campaigns/') {
+      return { Contents: campaigns.map(c => ({ Key: `campaigns/${(c as any).id}.json` })) }
+    }
+    if (cmd.__type === 'Get' && cmd.input.Key.startsWith('advertisers/')) {
+      const i = parseInt(cmd.input.Key.match(/(\d+)\.json/)![1], 10)
+      return { Body: { transformToString: async () => JSON.stringify(advertisers[i]) } }
+    }
+    if (cmd.__type === 'Get' && cmd.input.Key.startsWith('campaigns/')) {
+      const found = campaigns.find(c => cmd.input.Key.includes((c as any).id))
+      if (!found) { const e: any = new Error('NoSuchKey'); e.Code = 'NoSuchKey'; throw e }
+      return { Body: { transformToString: async () => JSON.stringify(found) } }
+    }
+    return {}
+  })
+}
+
+function putCalls() {
+  return __send.mock.calls.filter(([cmd]: any[]) => cmd.__type === 'Put').map(([cmd]: any[]) => ({ key: cmd.input.Key, body: JSON.parse(cmd.input.Body) }))
+}
+
+describe('serving: status gate', () => {
+  it('REGRESSION: legacy campaign (active:true, no status field) still serves', async () => {
+    const legacy = mkCampaign({ status: undefined, daily: undefined, advertiser_token: undefined })
+    delete (legacy as any).status; delete (legacy as any).daily; delete (legacy as any).advertiser_token
+    mockPortal([legacy])
+    const res = await req('/v1/impression', { surface: 'claude-code-spinner' })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.ad_text).toBe('Acme ad')
+  })
+
+  it('SAFETY: pending campaign never serves — falls back to default ad', async () => {
+    mockPortal([mkCampaign({ status: 'pending', active: false, budget_cents: 0 })])
+    const res = await req('/v1/impression', { surface: 'claude-code-spinner' })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.ad_text).toBe('Ramp · save time on expenses')  // env default, not the pending ad
+  })
+
+  it('rejected and paused campaigns never serve', async () => {
+    mockPortal([mkCampaign({ status: 'rejected', active: false }), mkCampaign({ id: CAMP_B_ID, status: 'paused', active: false })])
+    const res = await req('/v1/impression', { surface: 'claude-code-spinner' })
+    const body = await res.json()
+    expect(body.ad_text).toBe('Ramp · save time on expenses')
+  })
+})
+
+describe('POST /v1/advertiser/register', () => {
+  it('registers a new advertiser and returns token', async () => {
+    const notFound: any = new Error('NoSuchKey'); notFound.Code = 'NoSuchKey'
+    __send.mockRejectedValueOnce(notFound).mockResolvedValueOnce({})
+    const res = await req('/v1/advertiser/register', { email: 'new@corp.com', company_name: 'NewCorp' })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.token).toMatch(/^[0-9a-f-]{36}$/)
+  })
+
+  it('known email returns ok WITHOUT token (anti-hijack)', async () => {
+    __send.mockResolvedValueOnce({ Body: { transformToString: async () => JSON.stringify(ADVERTISER_A) } })
+    const res = await req('/v1/advertiser/register', { email: 'a@acme.com', company_name: 'Acme' })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.ok).toBe(true)
+    expect(body.token).toBeUndefined()
+  })
+
+  it('rejects invalid email and missing company', async () => {
+    expect((await req('/v1/advertiser/register', { email: 'nope', company_name: 'X' })).status).toBe(400)
+    expect((await req('/v1/advertiser/register', { email: 'a@b.co', company_name: '' })).status).toBe(400)
+  })
+})
+
+describe('GET /v1/advertiser/campaigns', () => {
+  it('rejects missing/malformed/unknown tokens', async () => {
+    mockPortal([])
+    expect((await app.request('/v1/advertiser/campaigns')).status).toBe(401)
+    expect((await app.request('/v1/advertiser/campaigns', { headers: { authorization: 'Bearer not-a-uuid' } })).status).toBe(401)
+    expect((await app.request('/v1/advertiser/campaigns', { headers: { authorization: 'Bearer 99999999-9999-4999-8999-999999999999' } })).status).toBe(401)
+  })
+
+  it('TENANCY: returns only own campaigns, with true impression counts and capped spend', async () => {
+    mockPortal([
+      mkCampaign({ daily: { '2026-07-09': { impressions: 40, spent_cents: 20 }, '2026-07-10': { impressions: 60, spent_cents: 30 } }, spent_cents: 12_000 }),
+      mkCampaign({ id: CAMP_B_ID, advertiser_token: ADV_TOKEN_B, ad_text: 'B ad' }),
+    ])
+    const res = await app.request('/v1/advertiser/campaigns', { headers: { authorization: `Bearer ${ADV_TOKEN}` } })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.campaigns).toHaveLength(1)
+    expect(body.campaigns[0].id).toBe(CAMP_A_ID)
+    expect(body.campaigns[0].impressions_delivered).toBe(100)
+    expect(body.campaigns[0].spent_cents).toBe(10_000)  // capped at budget
+  })
+})
+
+describe('POST /v1/advertiser/campaign', () => {
+  const valid = { ad_text: 'Try Acme', url: 'https://acme.example', cpm_cents: 500, requested_budget_cents: 5000, starts_at: '2026-01-01T00:00:00Z', ends_at: '2027-01-01T00:00:00Z' }
+
+  it('creates a pending campaign with zero funded budget and forced ownership', async () => {
+    mockPortal([])
+    const res = await req('/v1/advertiser/campaign', valid, { authorization: `Bearer ${ADV_TOKEN}` })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.campaign.status).toBe('pending')
+    const put = putCalls().find(p => p.key.startsWith('campaigns/'))!
+    expect(put.body.status).toBe('pending')
+    expect(put.body.active).toBe(false)
+    expect(put.body.budget_cents).toBe(0)
+    expect(put.body.requested_budget_cents).toBe(5000)
+    expect(put.body.advertiser_token).toBe(ADV_TOKEN)
+  })
+
+  it('strips ANSI from ad_text and rejects bad urls/budgets', async () => {
+    mockPortal([])
+    const res = await req('/v1/advertiser/campaign', { ...valid, ad_text: 'Buy\x1b[31m now' }, { authorization: `Bearer ${ADV_TOKEN}` })
+    expect(res.status).toBe(200)
+    const put = putCalls().find(p => p.key.startsWith('campaigns/'))!
+    expect(put.body.ad_text).not.toContain('\x1b')
+
+    expect((await req('/v1/advertiser/campaign', { ...valid, url: 'javascript:alert(1)' }, { authorization: `Bearer ${ADV_TOKEN}` })).status).toBe(400)
+    expect((await req('/v1/advertiser/campaign', { ...valid, requested_budget_cents: 0 }, { authorization: `Bearer ${ADV_TOKEN}` })).status).toBe(400)
+  })
+})
+
+describe('pause / resume', () => {
+  it('advertiser can pause own active campaign (and cache busts)', async () => {
+    mockPortal([mkCampaign()])
+    const res = await req(`/v1/advertiser/campaign/${CAMP_A_ID}/pause`, {}, { authorization: `Bearer ${ADV_TOKEN}` })
+    expect(res.status).toBe(200)
+    const put = putCalls().find(p => p.key === `campaigns/${CAMP_A_ID}.json`)!
+    expect(put.body.status).toBe('paused')
+    expect(put.body.active).toBe(false)
+  })
+
+  it("TENANCY: pausing another advertiser's campaign → 404", async () => {
+    mockPortal([mkCampaign({ advertiser_token: ADV_TOKEN_B })])
+    const res = await req(`/v1/advertiser/campaign/${CAMP_A_ID}/pause`, {}, { authorization: `Bearer ${ADV_TOKEN}` })
+    expect(res.status).toBe(404)
+  })
+
+  it('pausing a pending campaign → 409', async () => {
+    mockPortal([mkCampaign({ status: 'pending', active: false })])
+    const res = await req(`/v1/advertiser/campaign/${CAMP_A_ID}/pause`, {}, { authorization: `Bearer ${ADV_TOKEN}` })
+    expect(res.status).toBe(409)
+  })
+})
+
+describe('POST /v1/admin/campaign/:id/review', () => {
+  it('approve sets active + funded budget + optional cpm override', async () => {
+    mockPortal([mkCampaign({ status: 'pending', active: false, budget_cents: 0, requested_budget_cents: 5000 })])
+    const res = await req(`/v1/admin/campaign/${CAMP_A_ID}/review`, { action: 'approve', budget_cents: 4000, cpm_cents: 600 }, admin)
+    expect(res.status).toBe(200)
+    const put = putCalls().find(p => p.key === `campaigns/${CAMP_A_ID}.json`)!
+    expect(put.body.status).toBe('active')
+    expect(put.body.active).toBe(true)
+    expect(put.body.budget_cents).toBe(4000)
+    expect(put.body.cpm_cents).toBe(600)
+  })
+
+  it('approve without budget falls back to requested_budget_cents', async () => {
+    mockPortal([mkCampaign({ status: 'pending', active: false, budget_cents: 0, requested_budget_cents: 7000 })])
+    const res = await req(`/v1/admin/campaign/${CAMP_A_ID}/review`, { action: 'approve' }, admin)
+    expect(res.status).toBe(200)
+    const put = putCalls().find(p => p.key === `campaigns/${CAMP_A_ID}.json`)!
+    expect(put.body.budget_cents).toBe(7000)
+  })
+
+  it('reject sets rejected + reason; non-pending → 409; bad auth → 401', async () => {
+    mockPortal([mkCampaign({ status: 'pending', active: false })])
+    const res = await req(`/v1/admin/campaign/${CAMP_A_ID}/review`, { action: 'reject', rejection_reason: 'link broken' }, admin)
+    expect(res.status).toBe(200)
+    const put = putCalls().find(p => p.key === `campaigns/${CAMP_A_ID}.json`)!
+    expect(put.body.status).toBe('rejected')
+    expect(put.body.rejection_reason).toBe('link broken')
+
+    mockPortal([mkCampaign({ status: 'active' })])
+    expect((await req(`/v1/admin/campaign/${CAMP_A_ID}/review`, { action: 'approve', budget_cents: 100 }, admin)).status).toBe(409)
+    expect((await req(`/v1/admin/campaign/${CAMP_A_ID}/review`, { action: 'approve' }, { 'x-admin-token': 'wrong' })).status).toBe(401)
+  })
+})
+
+describe('GET /advertiser', () => {
+  it('serves the advertiser portal HTML', async () => {
+    const res = await app.request('/advertiser')
+    expect(res.status).toBe(200)
+    expect(await res.text()).toContain('advertiser portal')
+  })
+})

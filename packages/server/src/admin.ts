@@ -68,7 +68,14 @@ export const ADMIN_HTML = `<!doctype html>
   </div>
 
   <div class="card">
-    <h2 style="margin-top:0">campaigns</h2>
+    <h2 style="margin-top:0">approval queue</h2>
+    <table>
+      <thead><tr><th>advertiser</th><th>ad</th><th class="r">cpm ¢</th><th class="r">requested ¢</th><th></th></tr></thead>
+      <tbody id="queue"></tbody>
+    </table>
+    <div class="err" id="queueErr"></div>
+
+    <h2>campaigns</h2>
     <table>
       <thead><tr><th>advertiser</th><th>ad</th><th class="r">cpm ¢</th><th class="r">spent / budget ¢</th><th>window</th><th>status</th></tr></thead>
       <tbody id="campaigns"></tbody>
@@ -184,11 +191,26 @@ function refresh() {
 
   api('/v1/admin/campaigns').then(function(data) {
     CAMPAIGNS = data.campaigns || []
+
+    var pending = []
+    CAMPAIGNS.forEach(function(c, i) { if (c.status === 'pending') pending.push(i) })
+    $('queue').innerHTML = pending.map(function(i) {
+      var c = CAMPAIGNS[i]
+      return '<tr><td>' + esc(c.advertiser_name) + '<br><span class="muted">' + esc(c.advertiser_email || '') + '</span></td>' +
+        '<td>' + esc(c.ad_text) + '<br><span class="muted">' + esc(c.url) + '</span></td>' +
+        '<td class="r">' + c.cpm_cents + '</td><td class="r">' + (c.requested_budget_cents || 0) + '</td>' +
+        '<td><button class="sec" onclick="reviewCampaign(' + i + ', \\'approve\\')">approve</button> ' +
+        '<button class="sec" onclick="reviewCampaign(' + i + ', \\'reject\\')">reject</button></td></tr>'
+    }).join('') || '<tr><td colspan="5" class="muted">nothing pending</td></tr>'
+
+    var statusPill = function(s) {
+      return '<span class="pill ' + (s === 'active' ? 'on' : 'off') + '">' + esc(s || 'paused') + '</span>'
+    }
     $('campaigns').innerHTML = CAMPAIGNS.map(function(c, i) {
       return '<tr><td>' + esc(c.advertiser_name) + '</td><td>' + esc(c.ad_text) + '<br><span class="muted">' + esc(c.url) + '</span></td>' +
         '<td class="r">' + c.cpm_cents + '</td><td class="r">' + Math.round(c.spent_cents) + ' / ' + c.budget_cents + '</td>' +
         '<td>' + esc((c.starts_at || '').slice(0, 10)) + ' → ' + esc((c.ends_at || '').slice(0, 10)) + '</td>' +
-        '<td><span class="pill ' + (c.active ? 'on' : 'off') + '">' + (c.active ? 'active' : 'off') + '</span> ' +
+        '<td>' + statusPill(c.status) + ' ' +
         '<a href="#" style="color:#58a6ff" onclick="editCampaign(' + i + ');return false">edit</a></td></tr>'
     }).join('') || '<tr><td colspan="6" class="muted">no campaigns</td></tr>'
   }).catch(function(e) { $('campErr').textContent = e.message })
@@ -201,6 +223,25 @@ function refresh() {
         '<td>' + (d.payable ? '<button class="sec" onclick="payout(' + i + ')">record payout</button>' : '<span class="muted">&lt; $' + data.payout_minimum + '</span>') + '</td></tr>'
     }).join('') || '<tr><td colspan="5" class="muted">no ledgers yet</td></tr>'
   }).catch(function(e) { $('dueErr').textContent = e.message })
+}
+
+function reviewCampaign(i, action) {
+  var c = CAMPAIGNS[i]
+  $('queueErr').textContent = ''
+  var body = { action: action }
+  if (action === 'approve') {
+    var budget = Number(prompt('Funded budget_cents (invoice received/agreed):', c.requested_budget_cents || ''))
+    if (!budget) return
+    body.budget_cents = budget
+    var cpm = prompt('CPM override in cents (blank = keep ' + c.cpm_cents + '):', '')
+    if (cpm) body.cpm_cents = Number(cpm)
+  } else {
+    var reason = prompt('Rejection reason (shown to advertiser):', '')
+    if (reason === null) return
+    body.rejection_reason = reason
+  }
+  api('/v1/admin/campaign/' + c.id + '/review', { method: 'POST', body: JSON.stringify(body) })
+    .then(refresh).catch(function(e) { $('queueErr').textContent = e.message })
 }
 
 function editCampaign(i) {

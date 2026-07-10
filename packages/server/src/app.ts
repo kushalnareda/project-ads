@@ -1,12 +1,15 @@
 import { Hono, type Context } from 'hono'
 import { timingSafeEqual } from 'node:crypto'
 import { config } from './config.js'
-import { listCampaigns, logImpression, registerPublisher, upsertCampaign, incrementCampaignSpend, creditLedger, getLedger, listLedgers, listPublishers, getPayouts, recordPayout, getAdminStats, type Campaign, type Payout } from './r2.js'
+import { listCampaigns, logImpression, registerPublisher, upsertCampaign, incrementCampaignSpend, creditLedger, getLedger, listLedgers, listPublishers, getPayouts, recordPayout, getAdminStats, registerAdvertiser, listAdvertisers, getCampaign, type Campaign, type Payout, type Advertiser } from './r2.js'
 import { allow } from './ratelimit.js'
+import { withLock } from './locks.js'
 import { isPublisherToken, isUuid, isValidAdUrl, isValidEmail, isIsoDate, sanitizeAdText, AD_TEXT_MAX } from './validate.js'
 import { log } from './logger.js'
 import { ADMIN_HTML } from './admin.js'
 import { STATS_HTML } from './stats.js'
+import { ADVERTISER_HTML } from './advertiser.js'
+import { sanitizeLine } from './validate.js'
 
 const app = new Hono()
 
@@ -73,8 +76,10 @@ async function selectCampaign(surface: string): Promise<{ campaign: Campaign; cr
   }
 
   const nowIso = new Date().toISOString()
+  // Only 'active' serves: pending (awaiting review), rejected, and paused
+  // campaigns must never reach a publisher terminal.
   const eligible = campaignCache.data.filter(c =>
-    c.active &&
+    c.status === 'active' &&
     c.starts_at <= nowIso &&
     c.ends_at >= nowIso &&
     c.spent_cents < c.budget_cents
@@ -96,6 +101,9 @@ async function selectCampaign(surface: string): Promise<{ campaign: Campaign; cr
         spent_cents: 0,
         cpm_cents: 0,
         active: true,
+        status: 'active' as const,
+        advertiser_token: null,
+        daily: {},
         starts_at: '',
         ends_at: '',
         created_at: '',
@@ -258,6 +266,10 @@ app.post('/v1/admin/campaign', async (c) => {
     return c.json({ error: 'id must be a UUID' }, 400)
   }
 
+  // Legacy `active` maps to status; maintainer-created campaigns go straight
+  // to 'active' (no self-review needed).
+  const status = body.status ?? ((body.active ?? true) ? 'active' : 'paused')
+
   const campaign: Campaign = {
     id: body.id ?? crypto.randomUUID(),
     advertiser_name: body.advertiser_name.trim(),
@@ -266,7 +278,10 @@ app.post('/v1/admin/campaign', async (c) => {
     budget_cents: body.budget_cents,
     spent_cents: body.spent_cents ?? 0,
     cpm_cents: body.cpm_cents,
-    active: body.active ?? true,
+    active: status === 'active',
+    status,
+    advertiser_token: body.advertiser_token ?? null,
+    daily: body.daily ?? {},
     starts_at: body.starts_at,
     ends_at: body.ends_at,
     created_at: body.created_at ?? new Date().toISOString(),
@@ -283,20 +298,322 @@ app.post('/v1/admin/campaign', async (c) => {
   }
 })
 
-// Admin: list all campaigns (for dashboard)
+// Admin: list all campaigns (for dashboard), joined with advertiser emails
 app.get('/v1/admin/campaigns', async (c) => {
   if (!isAdmin(c)) {
     return c.json({ error: 'unauthorized' }, 401)
   }
 
   try {
-    const campaigns = await listCampaigns()
-    return c.json({ campaigns })
+    const [campaigns, advertisers] = await Promise.all([listCampaigns(), listAdvertisers()])
+    const emailByToken = new Map(advertisers.map(a => [a.token, a.email]))
+    return c.json({
+      campaigns: campaigns.map(cp => ({
+        ...cp,
+        advertiser_email: cp.advertiser_token ? emailByToken.get(cp.advertiser_token) ?? null : null,
+      })),
+    })
   } catch (err) {
     log.error('admin.campaigns_list_failed', err)
     return c.json({ error: 'failed to list campaigns' }, 500)
   }
 })
+
+// Admin: list advertisers (email join + lost-token recovery)
+app.get('/v1/admin/advertisers', async (c) => {
+  if (!isAdmin(c)) {
+    return c.json({ error: 'unauthorized' }, 401)
+  }
+  try {
+    return c.json({ advertisers: await listAdvertisers() })
+  } catch (err) {
+    log.error('admin.advertisers_list_failed', err)
+    return c.json({ error: 'failed to list advertisers' }, 500)
+  }
+})
+
+// Admin: approve or reject a pending campaign. Approve activates immediately
+// (invoice trails — explicit v1 policy) and sets the funded budget.
+app.post('/v1/admin/campaign/:id/review', async (c) => {
+  if (!isAdmin(c)) {
+    return c.json({ error: 'unauthorized' }, 401)
+  }
+
+  const id = c.req.param('id')
+  if (!isUuid(id)) {
+    return c.json({ error: 'invalid campaign id' }, 400)
+  }
+
+  let body: { action?: unknown; budget_cents?: unknown; cpm_cents?: unknown; rejection_reason?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: 'invalid JSON' }, 400)
+  }
+
+  if (body.action !== 'approve' && body.action !== 'reject') {
+    return c.json({ error: "action must be 'approve' or 'reject'" }, 400)
+  }
+
+  try {
+    const result = await withLockedCampaign(id, async (campaign) => {
+      if (campaign.status !== 'pending') {
+        return { status: 409 as const, error: `campaign is ${campaign.status}, not pending` }
+      }
+
+      if (body.action === 'approve') {
+        const budget = typeof body.budget_cents === 'number' && Number.isFinite(body.budget_cents)
+          ? body.budget_cents
+          : campaign.requested_budget_cents ?? 0
+        if (budget <= 0) {
+          return { status: 400 as const, error: 'budget_cents required (no requested budget to fall back on)' }
+        }
+        campaign.status = 'active'
+        campaign.budget_cents = budget
+        if (typeof body.cpm_cents === 'number' && Number.isFinite(body.cpm_cents) && body.cpm_cents > 0) {
+          campaign.cpm_cents = body.cpm_cents
+        }
+      } else {
+        campaign.status = 'rejected'
+        campaign.rejection_reason = sanitizeLine(body.rejection_reason, 300) || 'not approved'
+      }
+
+      await upsertCampaign(campaign)
+      return { status: 200 as const, campaign }
+    })
+
+    if (!result) return c.json({ error: 'campaign not found' }, 404)
+    if (result.status !== 200) return c.json({ error: result.error }, result.status)
+
+    campaignCache = null  // approval/rejection affects serving immediately
+    log.info('admin.campaign_reviewed', { campaign_id: id, action: body.action })
+    return c.json({ campaign: result.campaign })
+  } catch (err) {
+    log.error('admin.campaign_review_failed', err, { campaign_id: id })
+    return c.json({ error: 'review failed' }, 500)
+  }
+})
+
+// ---------- Advertiser portal API ----------
+
+const ADVERTISER_CREATE_LIMIT = { limit: 10, windowMs: 3_600_000 }
+const ADVERTISER_LIST_LIMIT = { limit: 60, windowMs: 60_000 }
+
+// Resolve Bearer token → advertiser via list-scan (n≤10s scale; rate limits
+// above protect the scan from unauthenticated cost amplification).
+async function advertiserFromBearer(c: Context): Promise<Advertiser | null> {
+  const auth = c.req.header('authorization')
+  const token = auth?.startsWith('Bearer ') ? auth.slice(7) : undefined
+  if (!isUuid(token)) return null
+  const advertisers = await listAdvertisers()
+  return advertisers.find(a => a.token === token) ?? null
+}
+
+// Load + mutate a campaign under its lock (same key incrementCampaignSpend
+// uses, so status transitions never race spend updates). Null when missing.
+async function withLockedCampaign<T>(id: string, fn: (campaign: Campaign) => Promise<T>): Promise<T | null> {
+  return withLock(`campaigns/${id}.json`, async () => {
+    const campaign = await getCampaign(id)
+    if (!campaign) return null
+    return fn(campaign)
+  })
+}
+
+app.post('/v1/advertiser/register', async (c) => {
+  let body: { email?: unknown; company_name?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: 'invalid JSON' }, 400)
+  }
+
+  if (!isValidEmail(body.email)) {
+    return c.json({ error: 'valid email is required' }, 400)
+  }
+  const company = sanitizeLine(body.company_name)
+  if (!company) {
+    return c.json({ error: 'company_name is required (1–100 chars)' }, 400)
+  }
+
+  if (!allow(`adreg:${clientIp(c)}`, REGISTER_LIMIT)) {
+    return c.json({ error: 'rate limited' }, 429)
+  }
+
+  try {
+    const { advertiser, existing } = await registerAdvertiser(body.email, company)
+    if (existing) {
+      // Anti-hijack: never return the token for a known email. Maintainer
+      // re-sends manually via GET /v1/admin/advertisers.
+      return c.json({ ok: true })
+    }
+    return c.json({ token: advertiser.token, registered_at: advertiser.registered_at })
+  } catch (err) {
+    log.error('advertiser.register_failed', err)
+    return c.json({ error: 'registration failed' }, 500)
+  }
+})
+
+app.get('/v1/advertiser/campaigns', async (c) => {
+  if (!allow(`advlist:${clientIp(c)}`, ADVERTISER_LIST_LIMIT)) {
+    return c.json({ error: 'rate limited' }, 429)
+  }
+
+  try {
+    const advertiser = await advertiserFromBearer(c)
+    if (!advertiser) {
+      return c.json({ error: 'advertiser token required (Authorization: Bearer <token>)' }, 401)
+    }
+
+    const campaigns = (await listCampaigns()).filter(cp => cp.advertiser_token === advertiser.token)
+    return c.json({
+      company_name: advertiser.company_name,
+      campaigns: campaigns.map(cp => ({
+        id: cp.id,
+        ad_text: cp.ad_text,
+        url: cp.url,
+        cpm_cents: cp.cpm_cents,
+        budget_cents: cp.budget_cents,
+        requested_budget_cents: cp.requested_budget_cents ?? null,
+        // Display spend capped at budget: the 60s cache can overrun slightly;
+        // the network eats overrun, the advertiser never sees spend > budget.
+        spent_cents: Math.min(cp.spent_cents, cp.budget_cents),
+        // True counts from daily buckets — derived spent/cpm math corrupts
+        // under CPM override at approval.
+        impressions_delivered: Object.values(cp.daily).reduce((sum, d) => sum + d.impressions, 0),
+        daily: cp.daily,
+        status: cp.status,
+        rejection_reason: cp.rejection_reason ?? null,
+        starts_at: cp.starts_at,
+        ends_at: cp.ends_at,
+        created_at: cp.created_at,
+      })),
+    })
+  } catch (err) {
+    log.error('advertiser.campaigns_failed', err)
+    return c.json({ error: 'failed to load campaigns' }, 500)
+  }
+})
+
+app.post('/v1/advertiser/campaign', async (c) => {
+  let advertiser: Advertiser | null
+  try {
+    advertiser = await advertiserFromBearer(c)
+  } catch (err) {
+    log.error('advertiser.auth_failed', err)
+    return c.json({ error: 'auth failed' }, 500)
+  }
+  if (!advertiser) {
+    return c.json({ error: 'advertiser token required (Authorization: Bearer <token>)' }, 401)
+  }
+
+  if (!allow(`advcreate:${advertiser.token}`, ADVERTISER_CREATE_LIMIT)) {
+    return c.json({ error: 'rate limited' }, 429)
+  }
+
+  let body: { ad_text?: unknown; url?: unknown; cpm_cents?: unknown; requested_budget_cents?: unknown; starts_at?: unknown; ends_at?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: 'invalid JSON' }, 400)
+  }
+
+  if (typeof body.ad_text !== 'string' || typeof body.url !== 'string' || typeof body.starts_at !== 'string' || typeof body.ends_at !== 'string') {
+    return c.json({ error: 'required: ad_text, url, cpm_cents, requested_budget_cents, starts_at, ends_at' }, 400)
+  }
+  const adText = sanitizeAdText(body.ad_text)
+  if (!adText) {
+    return c.json({ error: `ad_text must contain printable text (max ${AD_TEXT_MAX} chars)` }, 400)
+  }
+  if (!isValidAdUrl(body.url)) {
+    return c.json({ error: 'url must be a valid http(s) URL' }, 400)
+  }
+  if (typeof body.cpm_cents !== 'number' || !Number.isFinite(body.cpm_cents) || body.cpm_cents <= 0) {
+    return c.json({ error: 'cpm_cents must be a positive number' }, 400)
+  }
+  if (typeof body.requested_budget_cents !== 'number' || !Number.isInteger(body.requested_budget_cents) || body.requested_budget_cents <= 0) {
+    return c.json({ error: 'requested_budget_cents must be a positive integer' }, 400)
+  }
+  if (!isIsoDate(body.starts_at) || !isIsoDate(body.ends_at) || body.ends_at <= body.starts_at) {
+    return c.json({ error: 'starts_at and ends_at must be ISO dates with ends_at after starts_at' }, 400)
+  }
+
+  // Forced server-side: pending status, zero funded budget, caller ownership.
+  // NO edit endpoint exists by design — content changes go through a new
+  // campaign + review, or the human-review gate would be bypassable.
+  const campaign: Campaign = {
+    id: crypto.randomUUID(),
+    advertiser_name: advertiser.company_name,
+    ad_text: adText,
+    url: body.url,
+    budget_cents: 0,
+    requested_budget_cents: body.requested_budget_cents,
+    spent_cents: 0,
+    cpm_cents: body.cpm_cents,
+    active: false,
+    status: 'pending',
+    advertiser_token: advertiser.token,
+    daily: {},
+    starts_at: body.starts_at,
+    ends_at: body.ends_at,
+    created_at: new Date().toISOString(),
+  }
+
+  try {
+    await upsertCampaign(campaign)
+    log.info('campaign.pending_created', { campaign_id: campaign.id, advertiser_email: advertiser.email, requested_budget_cents: body.requested_budget_cents })
+    return c.json({ campaign: { id: campaign.id, status: campaign.status } })
+  } catch (err) {
+    log.error('advertiser.campaign_create_failed', err)
+    return c.json({ error: 'failed to create campaign' }, 500)
+  }
+})
+
+async function advertiserSetPaused(c: Context, paused: boolean) {
+  const id = c.req.param('id')
+  if (!isUuid(id)) {
+    return c.json({ error: 'invalid campaign id' }, 400)
+  }
+
+  let advertiser: Advertiser | null
+  try {
+    advertiser = await advertiserFromBearer(c)
+  } catch (err) {
+    log.error('advertiser.auth_failed', err)
+    return c.json({ error: 'auth failed' }, 500)
+  }
+  if (!advertiser) {
+    return c.json({ error: 'advertiser token required' }, 401)
+  }
+
+  try {
+    const result = await withLockedCampaign(id, async (campaign) => {
+      // Tenancy: the id alone is never sufficient authority. 404 (not 403)
+      // so existence of other advertisers' campaign ids doesn't leak.
+      if (campaign.advertiser_token !== advertiser!.token) {
+        return { status: 404 as const, error: 'campaign not found' }
+      }
+      const from = paused ? 'active' : 'paused'
+      if (campaign.status !== from) {
+        return { status: 409 as const, error: `campaign is ${campaign.status}, not ${from}` }
+      }
+      campaign.status = paused ? 'paused' : 'active'
+      await upsertCampaign(campaign)
+      return { status: 200 as const, campaign }
+    })
+
+    if (!result) return c.json({ error: 'campaign not found' }, 404)
+    if (result.status !== 200) return c.json({ error: result.error }, result.status)
+
+    campaignCache = null  // pause/resume affects serving immediately
+    return c.json({ campaign: { id, status: result.campaign.status } })
+  } catch (err) {
+    log.error('advertiser.pause_failed', err, { campaign_id: id })
+    return c.json({ error: 'failed to update campaign' }, 500)
+  }
+}
+
+app.post('/v1/advertiser/campaign/:id/pause', (c) => advertiserSetPaused(c, true))
+app.post('/v1/advertiser/campaign/:id/resume', (c) => advertiserSetPaused(c, false))
 
 // Minimum unpaid balance (credits == USD) before a publisher is payable
 const PAYOUT_MIN = 10
@@ -468,6 +785,9 @@ app.get('/dashboard', (c) => c.html(DASHBOARD_HTML))
 
 // Admin console — static HTML; every API call it makes is x-admin-token gated
 app.get('/admin', (c) => c.html(ADMIN_HTML))
+
+// Advertiser portal — static HTML, token auth client-side against /v1/advertiser/*
+app.get('/advertiser', (c) => c.html(ADVERTISER_HTML))
 
 const DASHBOARD_HTML = `<!doctype html>
 <html lang="en">
