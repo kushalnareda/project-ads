@@ -1,15 +1,14 @@
 import { Hono, type Context } from 'hono'
 import { timingSafeEqual } from 'node:crypto'
 import { config } from './config.js'
-import { listCampaigns, logImpression, registerPublisher, upsertCampaign, incrementCampaignSpend, creditLedger, getLedger, listLedgers, listPublishers, getPayouts, recordPayout, getAdminStats, registerAdvertiser, listAdvertisers, getCampaign, type Campaign, type Payout, type Advertiser } from './r2.js'
+import { listCampaigns, logImpression, registerPublisher, upsertCampaign, incrementCampaignSpend, creditLedger, getLedger, listLedgers, listPublishers, getPublisherByToken, getPayouts, recordPayout, createPayoutRequest, getPayoutRequests, listPayoutRequests, updatePayoutRequestStatus, getAdminStats, registerAdvertiser, listAdvertisers, getCampaign, type Campaign, type Payout, type PayoutRequest, type Advertiser } from './r2.js'
 import { allow } from './ratelimit.js'
 import { withLock } from './locks.js'
-import { isPublisherToken, isUuid, isValidAdUrl, isValidEmail, isIsoDate, sanitizeAdText, AD_TEXT_MAX } from './validate.js'
+import { isPublisherToken, isUuid, isValidAdUrl, isValidEmail, isIsoDate, sanitizeAdText, sanitizeLine, AD_TEXT_MAX } from './validate.js'
 import { log } from './logger.js'
 import { ADMIN_HTML } from './admin.js'
 import { STATS_HTML } from './stats.js'
 import { ADVERTISER_HTML } from './advertiser.js'
-import { sanitizeLine } from './validate.js'
 
 const app = new Hono()
 
@@ -195,7 +194,7 @@ app.post('/v1/impression', async (c) => {
 })
 
 app.post('/v1/publisher/register', async (c) => {
-  let body: { email?: unknown }
+  let body: { email?: unknown; name?: unknown; role?: unknown; country?: unknown; heard_from?: unknown }
   try {
     body = await c.req.json()
   } catch {
@@ -206,13 +205,25 @@ app.post('/v1/publisher/register', async (c) => {
     return c.json({ error: 'valid email is required' }, 400)
   }
 
+  // name required; role/country/heard_from optional profile fields for targeting.
+  const name = typeof body.name === 'string' ? sanitizeLine(body.name, 80) : ''
+  if (!name) {
+    return c.json({ error: 'name is required' }, 400)
+  }
+  const profile = {
+    name,
+    role: typeof body.role === 'string' && body.role.trim() ? sanitizeLine(body.role, 80) : undefined,
+    country: typeof body.country === 'string' && body.country.trim() ? sanitizeLine(body.country, 80) : undefined,
+    heard_from: typeof body.heard_from === 'string' && body.heard_from.trim() ? sanitizeLine(body.heard_from, 120) : undefined,
+  }
+
   if (!allow(`reg:${clientIp(c)}`, REGISTER_LIMIT)) {
     return c.json({ error: 'rate limited' }, 429)
   }
 
   try {
-    const publisher = await registerPublisher(body.email)
-    return c.json({ token: publisher.token, registered_at: publisher.registered_at })
+    const publisher = await registerPublisher(body.email, profile)
+    return c.json({ token: publisher.token, name: publisher.name, registered_at: publisher.registered_at })
   } catch (err) {
     log.error('register.failed', err)
     return c.json({ error: 'registration failed' }, 500)
@@ -628,22 +639,88 @@ app.get('/v1/publisher/earnings', async (c) => {
   }
 
   try {
-    const [ledger, payouts] = await Promise.all([getLedger(token), getPayouts(token)])
+    const [ledger, payouts, publisher, requests] = await Promise.all([
+      getLedger(token), getPayouts(token), getPublisherByToken(token), getPayoutRequests(token),
+    ])
     const paid = payouts.reduce((sum, p) => sum + p.amount, 0)
     const total = ledger?.total_credits ?? 0
     return c.json({
+      name: publisher?.name ?? null,
       total_credits: total,
       total_impressions: ledger?.total_impressions ?? 0,
       paid_credits: paid,
       unpaid_credits: Math.max(0, total - paid),
       payout_minimum: PAYOUT_MIN,
       payouts,
+      payout_requests: requests,
       daily: ledger?.daily ?? {},
       updated_at: ledger?.updated_at ?? null,
     })
   } catch (err) {
     log.error('earnings.load_failed', err)
     return c.json({ error: 'failed to load earnings' }, 500)
+  }
+})
+
+// Accepted cash-out destinations
+const PAYOUT_METHODS = new Set(['paypal', 'bank', 'wise', 'other'])
+const PAYOUT_REQUEST_LIMIT = { limit: 5, windowMs: 3_600_000 }
+
+// Publisher-initiated cash-out request. Auth by publisher token.
+app.post('/v1/publisher/payout-request', async (c) => {
+  const auth = c.req.header('authorization')
+  const token = auth?.startsWith('Bearer ') ? auth.slice(7) : undefined
+  if (!isPublisherToken(token)) {
+    return c.json({ error: 'publisher token required (Authorization: Bearer <token>)' }, 401)
+  }
+
+  let body: { method?: unknown; destination?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: 'invalid JSON' }, 400)
+  }
+
+  const method = typeof body.method === 'string' ? body.method.toLowerCase() : ''
+  if (!PAYOUT_METHODS.has(method)) {
+    return c.json({ error: `method must be one of: ${[...PAYOUT_METHODS].join(', ')}` }, 400)
+  }
+  const destination = typeof body.destination === 'string' ? sanitizeLine(body.destination, 200) : ''
+  if (!destination) {
+    return c.json({ error: 'destination is required' }, 400)
+  }
+
+  if (!allow(`payreq:${token}`, PAYOUT_REQUEST_LIMIT)) {
+    return c.json({ error: 'rate limited' }, 429)
+  }
+
+  try {
+    const [ledger, payouts, existing] = await Promise.all([
+      getLedger(token), getPayouts(token), getPayoutRequests(token),
+    ])
+    const paid = payouts.reduce((sum, p) => sum + p.amount, 0)
+    const unpaid = Math.max(0, (ledger?.total_credits ?? 0) - paid)
+
+    if (unpaid < PAYOUT_MIN) {
+      return c.json({ error: `unpaid balance ${unpaid.toFixed(4)} is below the $${PAYOUT_MIN} minimum` }, 400)
+    }
+    if (existing.some(r => r.status === 'pending')) {
+      return c.json({ error: 'a payout request is already pending' }, 409)
+    }
+
+    const request: PayoutRequest = {
+      publisher_token: token,
+      amount: unpaid,
+      method,
+      destination,
+      status: 'pending',
+      requested_at: new Date().toISOString(),
+    }
+    await createPayoutRequest(request)
+    return c.json({ request })
+  } catch (err) {
+    log.error('payout_request.create_failed', err)
+    return c.json({ error: 'failed to create payout request' }, 500)
   }
 })
 
@@ -780,6 +857,93 @@ app.get('/v1/admin/stats', async (c) => {
 
 app.get('/stats', (c) => c.html(STATS_HTML))
 
+// Admin: list publisher-initiated payout requests (joined with email + name)
+app.get('/v1/admin/payout-requests', async (c) => {
+  if (!isAdmin(c)) {
+    return c.json({ error: 'unauthorized' }, 401)
+  }
+  try {
+    const [requests, publishers] = await Promise.all([listPayoutRequests(), listPublishers()])
+    const byToken = new Map(publishers.map(p => [p.token, p]))
+    const enriched = requests.map(r => ({
+      ...r,
+      email: byToken.get(r.publisher_token)?.email ?? null,
+      name: byToken.get(r.publisher_token)?.name ?? null,
+    }))
+    // Pending first, then newest resolved
+    const rank = (s: string) => (s === 'pending' ? 0 : 1)
+    enriched.sort((a, b) => rank(a.status) - rank(b.status) || b.requested_at.localeCompare(a.requested_at))
+    return c.json({ requests: enriched })
+  } catch (err) {
+    log.error('admin.payout_requests_list_failed', err)
+    return c.json({ error: 'failed to list payout requests' }, 500)
+  }
+})
+
+// Admin: resolve a payout request — 'paid' records a Payout receipt too, 'rejected' just closes it
+app.post('/v1/admin/payout-requests/resolve', async (c) => {
+  if (!isAdmin(c)) {
+    return c.json({ error: 'unauthorized' }, 401)
+  }
+  let body: { publisher_token?: unknown; requested_at?: unknown; action?: unknown; reference?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: 'invalid JSON' }, 400)
+  }
+  if (
+    !isPublisherToken(body.publisher_token) ||
+    typeof body.requested_at !== 'string' || !body.requested_at ||
+    (body.action !== 'paid' && body.action !== 'rejected')
+  ) {
+    return c.json({ error: "required: publisher_token (uuid), requested_at (string), action ('paid'|'rejected')" }, 400)
+  }
+  const token = body.publisher_token
+  const requestedAt = body.requested_at
+
+  try {
+    const requests = await getPayoutRequests(token)
+    const req = requests.find(r => r.requested_at === requestedAt)
+    if (!req) {
+      return c.json({ error: 'payout request not found' }, 404)
+    }
+    if (req.status !== 'pending') {
+      return c.json({ error: `request already ${req.status}` }, 409)
+    }
+
+    if (body.action === 'rejected') {
+      const updated = await updatePayoutRequestStatus(token, requestedAt, 'rejected')
+      return c.json({ request: updated })
+    }
+
+    // action === 'paid': re-validate balance, record the payout, then close the request.
+    const [ledger, payouts] = await Promise.all([getLedger(token), getPayouts(token)])
+    const paid = payouts.reduce((sum, p) => sum + p.amount, 0)
+    const unpaid = (ledger?.total_credits ?? 0) - paid
+    if (req.amount > unpaid + 1e-9) {
+      return c.json({ error: `request amount ${req.amount} exceeds current unpaid balance ${unpaid.toFixed(4)}` }, 400)
+    }
+    // Reference ties the receipt to this request for idempotency.
+    const reference = typeof body.reference === 'string' && body.reference
+      ? body.reference
+      : `payout-request:${requestedAt}`
+    if (!payouts.some(p => p.reference === reference)) {
+      await recordPayout({
+        publisher_token: token,
+        amount: req.amount,
+        method: req.method,
+        reference,
+        paid_at: new Date().toISOString(),
+      })
+    }
+    const updated = await updatePayoutRequestStatus(token, requestedAt, 'paid', reference)
+    return c.json({ request: updated, remaining_unpaid: unpaid - req.amount })
+  } catch (err) {
+    log.error('admin.payout_request_resolve_failed', err)
+    return c.json({ error: 'failed to resolve payout request' }, 500)
+  }
+})
+
 // Publisher dashboard — static HTML, fetches earnings client-side
 app.get('/dashboard', (c) => c.html(DASHBOARD_HTML))
 
@@ -802,10 +966,18 @@ const DASHBOARD_HTML = `<!doctype html>
   h1 { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
   .sub { color: #7d8590; font-size: 13px; margin-bottom: 32px; }
   .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 24px; width: 100%; max-width: 560px; }
-  input { width: 100%; padding: 10px 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; font: inherit; margin-bottom: 12px; }
+  input, select { width: 100%; padding: 10px 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; font: inherit; margin-bottom: 12px; }
   button { width: 100%; padding: 10px; background: #238636; border: none; border-radius: 6px; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
   button:hover { background: #2ea043; }
+  button:disabled { background: #21262d; color: #7d8590; cursor: default; }
   .stats { display: none; }
+  .section-label { font-size: 11px; color: #7d8590; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .banner { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 12px; font-size: 13px; margin: 4px 0 20px; }
+  .banner.pending { border-color: #9e6a03; color: #e3b341; }
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; }
+  .badge.pending { background: #3a2d0a; color: #e3b341; }
+  .badge.paid { background: #1a3a24; color: #3fb950; }
+  .badge.rejected { background: #3a1a1a; color: #f85149; }
   .row { display: flex; gap: 12px; margin: 24px 0; }
   .stat { flex: 1; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 16px; text-align: center; }
   .stat .num { font-size: 24px; font-weight: 700; color: #3fb950; }
@@ -819,7 +991,7 @@ const DASHBOARD_HTML = `<!doctype html>
 </head>
 <body>
 <h1>📢 project-ads</h1>
-<div class="sub">publisher earnings</div>
+<div class="sub" id="sub">publisher earnings</div>
 <div class="card">
   <div id="login">
     <input id="token" type="password" placeholder="publisher token (from ~/.project-ads/config.json)">
@@ -833,10 +1005,37 @@ const DASHBOARD_HTML = `<!doctype html>
       <div class="stat"><div class="num" id="impressions">–</div><div class="label">impressions</div></div>
     </div>
     <div id="payhint" style="font-size:12px;color:#7d8590;margin:-12px 0 20px;text-align:center"></div>
+
+    <div id="cashoutWrap" style="display:none;margin-bottom:24px">
+      <div class="section-label">cash out</div>
+      <div id="cashoutBanner" class="banner" style="display:none"></div>
+      <div id="cashoutForm" style="display:none">
+        <select id="co_method">
+          <option value="paypal">PayPal</option>
+          <option value="bank">Bank transfer</option>
+          <option value="wise">Wise</option>
+          <option value="other">Other</option>
+        </select>
+        <input id="co_dest" placeholder="PayPal email / bank details / etc.">
+        <button id="co_submit" onclick="requestPayout()">Request payout</button>
+        <div class="err" id="co_err"></div>
+      </div>
+      <button id="cashoutBtn" onclick="showCashout()">Cash out</button>
+    </div>
+
     <table>
       <thead><tr><th>day</th><th class="r">impressions</th><th class="r">credits</th></tr></thead>
       <tbody id="days"></tbody>
     </table>
+
+    <div id="requestsWrap" style="display:none;margin-top:20px">
+      <div class="section-label">payout requests</div>
+      <table>
+        <thead><tr><th>date</th><th>method</th><th class="r">amount</th><th class="r">status</th></tr></thead>
+        <tbody id="requests"></tbody>
+      </table>
+    </div>
+
     <div id="payoutsWrap" style="display:none;margin-top:20px">
       <div style="font-size:12px;color:#7d8590;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">payouts</div>
       <table>
@@ -851,9 +1050,14 @@ const DASHBOARD_HTML = `<!doctype html>
   </div>
 </div>
 <script>
+const $ = id => document.getElementById(id)
+function esc(s) { const d = document.createElement('div'); d.textContent = String(s ?? ''); return d.innerHTML }
+let currentToken = null
+let payoutMin = 10
+
 async function load(tokenArg) {
-  const token = (tokenArg ?? document.getElementById('token').value).trim()
-  const err = document.getElementById('err')
+  const token = (tokenArg ?? $('token').value).trim()
+  const err = $('err')
   err.style.display = 'none'
   if (!token) return
   try {
@@ -861,33 +1065,92 @@ async function load(tokenArg) {
     if (!res.ok) throw new Error('HTTP ' + res.status)
     const d = await res.json()
     localStorage.setItem('pa_token', token)
-    document.getElementById('credits').textContent = '$' + (d.total_credits ?? 0).toFixed(4)
-    document.getElementById('unpaid').textContent = '$' + (d.unpaid_credits ?? 0).toFixed(4)
-    document.getElementById('impressions').textContent = d.total_impressions ?? 0
+    currentToken = token
+    $('sub').textContent = d.name ? 'Hi, ' + d.name + ' — your earnings' : 'publisher earnings'
+    $('credits').textContent = '$' + (d.total_credits ?? 0).toFixed(4)
+    $('unpaid').textContent = '$' + (d.unpaid_credits ?? 0).toFixed(4)
+    $('impressions').textContent = d.total_impressions ?? 0
     const min = d.payout_minimum ?? 10
+    payoutMin = min
     const unpaid = d.unpaid_credits ?? 0
-    document.getElementById('payhint').textContent = unpaid >= min
-      ? 'payout eligible — you will be paid this cycle'
+    $('payhint').textContent = unpaid >= min
+      ? 'payout eligible — request a cash-out below'
       : '$' + (min - unpaid).toFixed(2) + ' more until $' + min + ' payout minimum'
+
+    const requests = d.payout_requests ?? []
+    const pending = requests.find(r => r.status === 'pending')
+    renderCashout(unpaid, min, pending)
+    renderRequests(requests)
+
     const payouts = d.payouts ?? []
     if (payouts.length) {
-      document.getElementById('payoutsWrap').style.display = 'block'
-      document.getElementById('payouts').innerHTML = payouts.map(p =>
-        '<tr><td>' + p.paid_at.slice(0, 10) + '</td><td>' + p.method + '</td><td class="r">$' + p.amount.toFixed(2) + '</td></tr>'
+      $('payoutsWrap').style.display = 'block'
+      $('payouts').innerHTML = payouts.map(p =>
+        '<tr><td>' + p.paid_at.slice(0, 10) + '</td><td>' + esc(p.method) + '</td><td class="r">$' + p.amount.toFixed(2) + '</td></tr>'
       ).join('')
     }
     const days = Object.entries(d.daily ?? {}).sort((a, b) => b[0].localeCompare(a[0]))
-    document.getElementById('days').innerHTML = days.map(([day, v]) =>
+    $('days').innerHTML = days.map(([day, v]) =>
       '<tr><td>' + day + '</td><td class="r">' + v.impressions + '</td><td class="r">' + v.credits.toFixed(4) + '</td></tr>'
     ).join('') || '<tr><td colspan="3" style="color:#7d8590">no impressions yet</td></tr>'
-    document.getElementById('login').style.display = 'none'
-    document.getElementById('stats').style.display = 'block'
+    $('login').style.display = 'none'
+    $('stats').style.display = 'block'
   } catch (e) {
     localStorage.removeItem('pa_token')
     err.textContent = 'failed to load: ' + e.message
     err.style.display = 'block'
   }
 }
+
+function renderCashout(unpaid, min, pending) {
+  const wrap = $('cashoutWrap'), banner = $('cashoutBanner'), form = $('cashoutForm'), btn = $('cashoutBtn')
+  wrap.style.display = 'block'
+  form.style.display = 'none'
+  banner.style.display = 'none'
+  btn.style.display = 'none'
+  if (pending) {
+    banner.className = 'banner pending'
+    banner.style.display = 'block'
+    banner.textContent = 'Payout of $' + pending.amount.toFixed(2) + ' requested via ' + pending.method + ' — pending review.'
+  } else if (unpaid >= min) {
+    btn.style.display = 'block'
+  } else {
+    wrap.style.display = 'none'
+  }
+}
+function showCashout() {
+  $('cashoutBtn').style.display = 'none'
+  $('cashoutForm').style.display = 'block'
+}
+async function requestPayout() {
+  const err = $('co_err'); err.style.display = 'none'
+  const method = $('co_method').value
+  const destination = $('co_dest').value.trim()
+  if (!destination) { err.textContent = 'destination is required'; err.style.display = 'block'; return }
+  $('co_submit').disabled = true
+  try {
+    const res = await fetch('/v1/publisher/payout-request', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + currentToken, 'content-type': 'application/json' },
+      body: JSON.stringify({ method, destination }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status))
+    load(currentToken)
+  } catch (e) {
+    err.textContent = e.message; err.style.display = 'block'
+    $('co_submit').disabled = false
+  }
+}
+function renderRequests(requests) {
+  if (!requests.length) { $('requestsWrap').style.display = 'none'; return }
+  $('requestsWrap').style.display = 'block'
+  $('requests').innerHTML = requests.map(r =>
+    '<tr><td>' + r.requested_at.slice(0, 10) + '</td><td>' + esc(r.method) + '</td><td class="r">$' + r.amount.toFixed(2) +
+    '</td><td class="r"><span class="badge ' + r.status + '">' + r.status + '</span></td></tr>'
+  ).join('')
+}
+
 function logout() {
   localStorage.removeItem('pa_token')
   history.replaceState(null, '', '/dashboard')

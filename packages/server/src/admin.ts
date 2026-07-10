@@ -102,6 +102,13 @@ export const ADMIN_HTML = `<!doctype html>
       <tbody id="due"></tbody>
     </table>
     <div class="err" id="dueErr"></div>
+
+    <h2>payout requests</h2>
+    <table>
+      <thead><tr><th>publisher</th><th>method / destination</th><th class="r">amount</th><th>status</th><th></th></tr></thead>
+      <tbody id="requests"></tbody>
+    </table>
+    <div class="err" id="reqErr"></div>
     <div style="margin-top:16px;font-size:12px;text-align:right">
       <a href="#" onclick="refresh();return false" style="color:#58a6ff;margin-right:12px">refresh</a>
       <a href="/stats" style="color:#58a6ff;margin-right:12px" target="_blank">public stats ↗</a>
@@ -170,6 +177,7 @@ function drawSpark(daily) {
 
 var CAMPAIGNS = []
 var DUE = []
+var REQUESTS = []
 
 function refresh() {
   api('/v1/admin/stats').then(function(s) {
@@ -223,6 +231,34 @@ function refresh() {
         '<td>' + (d.payable ? '<button class="sec" onclick="payout(' + i + ')">record payout</button>' : '<span class="muted">&lt; $' + data.payout_minimum + '</span>') + '</td></tr>'
     }).join('') || '<tr><td colspan="5" class="muted">no ledgers yet</td></tr>'
   }).catch(function(e) { $('dueErr').textContent = e.message })
+
+  api('/v1/admin/payout-requests').then(function(data) {
+    REQUESTS = data.requests || []
+    $('requests').innerHTML = REQUESTS.map(function(r, i) {
+      var who = esc(r.name || r.email || r.publisher_token.slice(0, 8) + '…')
+      var actions = r.status === 'pending'
+        ? '<button class="sec" onclick="resolveReq(' + i + ', \\'paid\\')">mark paid</button> ' +
+          '<button class="sec" onclick="resolveReq(' + i + ', \\'rejected\\')">reject</button>'
+        : '<span class="muted">' + esc(r.status) + '</span>'
+      return '<tr><td>' + who + '<br><span class="muted">' + esc(r.email || '') + '</span></td>' +
+        '<td>' + esc(r.method) + '<br><span class="muted">' + esc(r.destination) + '</span></td>' +
+        '<td class="r">$' + r.amount.toFixed(2) + '</td>' +
+        '<td><span class="pill ' + (r.status === 'pending' ? 'on' : 'off') + '">' + esc(r.status) + '</span></td>' +
+        '<td>' + actions + '</td></tr>'
+    }).join('') || '<tr><td colspan="5" class="muted">no payout requests</td></tr>'
+  }).catch(function(e) { $('reqErr').textContent = e.message })
+}
+
+function resolveReq(i, action) {
+  var r = REQUESTS[i]
+  if (action === 'paid' && !confirm('Record a $' + r.amount.toFixed(2) + ' payout to ' + (r.name || r.email || r.publisher_token) + ' via ' + r.method + ' (' + r.destination + ')?')) return
+  if (action === 'rejected' && !confirm('Reject this payout request?')) return
+  var reference = ''
+  if (action === 'paid') reference = prompt('Payment reference (optional idempotency key):', '') || ''
+  api('/v1/admin/payout-requests/resolve', {
+    method: 'POST',
+    body: JSON.stringify({ publisher_token: r.publisher_token, requested_at: r.requested_at, action: action, reference: reference }),
+  }).then(refresh).catch(function(e) { $('reqErr').textContent = e.message })
 }
 
 function reviewCampaign(i, action) {

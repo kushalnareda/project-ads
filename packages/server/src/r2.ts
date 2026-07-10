@@ -65,7 +65,16 @@ export interface Impression {
   publisher_token: string | null
 }
 
-export interface Publisher {
+// Profile fields captured at onboarding. name is required; the rest are
+// optional and feed future ad targeting (role/country) + attribution.
+export interface PublisherProfile {
+  name: string
+  role?: string        // job title / profession, e.g. "Frontend engineer"
+  country?: string     // for geo-targeted ads
+  heard_from?: string  // acquisition attribution
+}
+
+export interface Publisher extends PublisherProfile {
   email: string
   token: string
   registered_at: string
@@ -76,14 +85,30 @@ async function sha256hex(input: string): Promise<string> {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-export async function registerPublisher(email: string): Promise<Publisher> {
+export async function registerPublisher(email: string, profile: PublisherProfile): Promise<Publisher> {
   const hash = await sha256hex(email.toLowerCase().trim())
   const key = `publishers/${hash}.json`
 
   try {
     const res = await client.send(new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }))
-    const body = await res.Body!.transformToString()
-    return JSON.parse(body) as Publisher
+    const existing = JSON.parse(await res.Body!.transformToString()) as Publisher
+    // Idempotent: keep the original token/registered_at, but backfill any
+    // profile fields that are newly provided (e.g. an early publisher who
+    // registered before we collected name/role re-runs setup).
+    const merged: Publisher = {
+      ...existing,
+      name: existing.name || profile.name,
+      role: existing.role ?? profile.role,
+      country: existing.country ?? profile.country,
+      heard_from: existing.heard_from ?? profile.heard_from,
+    }
+    if (JSON.stringify(merged) !== JSON.stringify(existing)) {
+      await client.send(new PutObjectCommand({
+        Bucket: config.r2.bucket, Key: key,
+        Body: JSON.stringify(merged), ContentType: 'application/json',
+      }))
+    }
+    return merged
   } catch (err: any) {
     const code = err?.Code ?? err?.code ?? err?.name
     if (code !== 'NoSuchKey') throw err
@@ -93,6 +118,10 @@ export async function registerPublisher(email: string): Promise<Publisher> {
     email,
     token: crypto.randomUUID(),
     registered_at: new Date().toISOString(),
+    name: profile.name,
+    ...(profile.role ? { role: profile.role } : {}),
+    ...(profile.country ? { country: profile.country } : {}),
+    ...(profile.heard_from ? { heard_from: profile.heard_from } : {}),
   }
 
   await client.send(new PutObjectCommand({
@@ -173,6 +202,13 @@ export async function getCampaign(id: string): Promise<Campaign | null> {
     if (code === 'NoSuchKey') return null
     throw err
   }
+}
+
+// Look up a publisher by their token (scans publishers/). Used by earnings +
+// admin joins. Fine at MVP scale; revisit with an index if publisher count grows.
+export async function getPublisherByToken(token: string): Promise<Publisher | null> {
+  const publishers = await listPublishers()
+  return publishers.find(p => p.token === token) ?? null
 }
 
 export async function listCampaigns(): Promise<Campaign[]> {
@@ -481,6 +517,93 @@ export async function getAdminStats(): Promise<AdminStats> {
     top_publishers: topPublishers,
     computed_at: new Date().toISOString(),
   }
+}
+
+// A publisher-initiated cash-out. Created 'pending'; admin resolves to
+// 'paid' (which also records a Payout receipt) or 'rejected'.
+export interface PayoutRequest {
+  publisher_token: string
+  amount: number          // credits (== USD) snapshot at request time
+  method: string          // 'paypal' | 'bank' | 'wise' | 'other'
+  destination: string     // paypal email / bank detail / etc.
+  status: 'pending' | 'paid' | 'rejected'
+  requested_at: string    // ISO — also the object key
+  resolved_at?: string
+  reference?: string      // external payment reference once paid
+}
+
+export async function createPayoutRequest(req: PayoutRequest): Promise<void> {
+  const key = `payout_requests/${req.publisher_token}/${req.requested_at}.json`
+  await client.send(new PutObjectCommand({
+    Bucket: config.r2.bucket,
+    Key: key,
+    Body: JSON.stringify(req),
+    ContentType: 'application/json',
+  }))
+}
+
+export async function getPayoutRequests(publisherToken: string): Promise<PayoutRequest[]> {
+  const list = await client.send(new ListObjectsV2Command({
+    Bucket: config.r2.bucket,
+    Prefix: `payout_requests/${publisherToken}/`,
+  }))
+  const keys = (list.Contents ?? []).map(o => o.Key!).filter(k => k.endsWith('.json'))
+  if (keys.length === 0) return []
+  const results = await Promise.allSettled(
+    keys.map(async key => {
+      const res = await client.send(new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }))
+      return JSON.parse(await res.Body!.transformToString()) as PayoutRequest
+    })
+  )
+  return results
+    .filter((r): r is PromiseFulfilledResult<PayoutRequest> => r.status === 'fulfilled')
+    .map(r => r.value)
+    .sort((a, b) => b.requested_at.localeCompare(a.requested_at))
+}
+
+export async function listPayoutRequests(): Promise<PayoutRequest[]> {
+  const list = await client.send(new ListObjectsV2Command({
+    Bucket: config.r2.bucket,
+    Prefix: 'payout_requests/',
+  }))
+  const keys = (list.Contents ?? []).map(o => o.Key!).filter(k => k.endsWith('.json'))
+  if (keys.length === 0) return []
+  const results = await Promise.allSettled(
+    keys.map(async key => {
+      const res = await client.send(new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }))
+      return JSON.parse(await res.Body!.transformToString()) as PayoutRequest
+    })
+  )
+  return results
+    .filter((r): r is PromiseFulfilledResult<PayoutRequest> => r.status === 'fulfilled')
+    .map(r => r.value)
+}
+
+export async function updatePayoutRequestStatus(
+  publisherToken: string,
+  requestedAt: string,
+  status: 'paid' | 'rejected',
+  reference?: string,
+): Promise<PayoutRequest | null> {
+  const key = `payout_requests/${publisherToken}/${requestedAt}.json`
+  // Serialized per request object so a double resolve can't race.
+  return withLock(key, async () => {
+    let req: PayoutRequest
+    try {
+      const res = await client.send(new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }))
+      req = JSON.parse(await res.Body!.transformToString()) as PayoutRequest
+    } catch {
+      return null
+    }
+    req.status = status
+    req.resolved_at = new Date().toISOString()
+    if (reference) req.reference = reference
+    await client.send(new PutObjectCommand({
+      Bucket: config.r2.bucket, Key: key,
+      Body: JSON.stringify(req), ContentType: 'application/json',
+    }))
+    return req
+  })
 }
 
 export async function logImpression(impression: Impression): Promise<void> {
