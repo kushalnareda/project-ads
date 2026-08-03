@@ -1,6 +1,7 @@
 # Build output
 **/dist/
 **/node_modules/
+packages/server/public/
 
 # Local secrets — never commit
 .env

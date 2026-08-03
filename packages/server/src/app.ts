@@ -9,8 +9,13 @@ import { log } from './logger.js'
 import { ADMIN_HTML } from './admin.js'
 import { STATS_HTML } from './stats.js'
 import { ADVERTISER_HTML } from './advertiser.js'
+import { serveStatic } from '@hono/node-server/serve-static'
 
 const app = new Hono()
+
+// Serve static website files
+app.use('/assets/*', serveStatic({ root: './public' }))
+app.get('/', serveStatic({ path: './public/index.html' }))
 
 // Surface 5xx responses in structured logs; individual handlers already log
 // their own failure detail.
