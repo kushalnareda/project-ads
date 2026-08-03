@@ -510,7 +510,7 @@ export const LANDING_HTML = `<!doctype html>
     font-size: 14px;
     color: var(--on-surface-secondary);
     line-height: 1.6;
-    margin: -4px 0 20px;
+    margin: 2px 0 20px;
     max-width: 640px;
   }
   #ad-sim .sim-sub b { color: var(--on-surface); font-weight: 600; }
@@ -523,6 +523,8 @@ export const LANDING_HTML = `<!doctype html>
     background: rgba(10, 10, 12, 0.97);
     box-shadow: 0 20px 60px rgba(0,0,0,0.55);
     max-width: 720px;
+    width: 100%;
+    margin: 0 auto;
   }
 
   #ad-sim .title-bar {
@@ -672,7 +674,8 @@ export const LANDING_HTML = `<!doctype html>
     width: fit-content;
     align-items: center;
     gap: 8px;
-    padding: 8px 0 3px;
+    padding: 8px 0 7px;
+    line-height: 1.5;
     border-bottom: 2px solid var(--secondary);
     cursor: pointer;
   }
