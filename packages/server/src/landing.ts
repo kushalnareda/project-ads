@@ -505,201 +505,191 @@ export const LANDING_HTML = `<!doctype html>
     animation: installGlow 1.4s ease forwards;
   }
 
-  /* Interactive CLI Animation Frame */
-  .terminal-surfaces {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
-    align-items: start;
-  }
-
-  @media (max-width: 700px) {
-    .terminal-surfaces {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  .surface-label {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-    color: var(--primary);
-    margin-bottom: 10px;
-    opacity: 0.8;
-  }
-
-  .terminal-box {
-    background: rgba(10, 10, 12, 0.97);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 16px;
-    overflow: hidden;
-    font-family: var(--mono);
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
-  }
-
-  .terminal-header {
-    background: rgba(255, 255, 255, 0.03);
-    border-bottom: 1px solid rgba(255,255,255,0.07);
-    padding: 10px 16px;
-    font-size: 12px;
-    color: var(--on-surface-muted);
-    display: flex;
-    gap: 8px;
-    align-items: center;
-  }
-
-  .dot {
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-  }
-  .dot-red { background: #ff5f56; }
-  .dot-yellow { background: #ffbd2e; }
-  .dot-green { background: #27c93f; }
-
-  .terminal-screen {
-    padding: 20px 20px 16px;
-    font-size: 13px;
-    line-height: 1.7;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    color: var(--on-surface-secondary);
-  }
-
-  /* ── Surface 1: Spinner ad (shown during thinking, transient) ── */
-  .spinner-line {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--on-surface-muted);
-    font-size: 13px;
-  }
-
-  .c-spinner {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 16px;
-    height: 16px;
+  /* ── "How ads appear" simulator: one unified app window ── */
+  #ad-sim .sim-sub {
     font-size: 14px;
-    font-weight: 900;
-    color: var(--primary);
-    animation: spin-c 2s steps(4, end) infinite;
-    flex-shrink: 0;
-  }
-
-  @keyframes spin-c {
-    0%   { content: 'C'; opacity: 1; }
-    25%  { opacity: 0.4; }
-    50%  { opacity: 1; }
-    75%  { opacity: 0.4; }
-    100% { opacity: 1; }
-  }
-
-  .spinner-ad-line {
-    display: flex;
-    align-items: center;
-    gap: 0;
-    font-size: 13px;
     color: var(--on-surface-secondary);
-    border-left: 2px solid var(--primary);
-    padding-left: 14px;
-    margin-top: 4px;
-    opacity: 0;
-    animation: fadeInLine 0.6s ease forwards;
-    animation-delay: 1.2s;
+    line-height: 1.6;
+    margin: -4px 0 20px;
+    max-width: 640px;
   }
+  #ad-sim .sim-sub b { color: var(--on-surface); font-weight: 600; }
 
-  @keyframes fadeInLine {
-    to { opacity: 1; }
-  }
-
-  /* ── Surface 2: Persistent statusline ad (always visible bottom bar) ── */
-  .statusline-box {
-    background: #1a1a1f;
-    border: 1px solid rgba(255,255,255,0.1);
+  #ad-sim .app-window {
+    border: 1px solid var(--border);
     border-radius: 14px;
     overflow: hidden;
     font-family: var(--mono);
-    box-shadow: 0 8px 30px rgba(0,0,0,0.5);
-    position: relative;
+    background: rgba(10, 10, 12, 0.97);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.55);
+    max-width: 720px;
   }
 
-  .statusline-chat {
-    padding: 16px 20px 10px;
-    font-size: 13px;
-    color: var(--on-surface-secondary);
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-    display: flex;
-    gap: 16px;
-    align-items: flex-start;
-  }
-
-  .statusline-prompt-arrow {
-    color: #888;
-    font-size: 16px;
-    flex-shrink: 0;
-    margin-top: 1px;
-  }
-
-  .statusline-bar {
-    padding: 6px 20px;
-    font-size: 12.5px;
+  #ad-sim .title-bar {
+    background: rgba(255,255,255,0.03);
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    padding: 10px 14px;
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+  #ad-sim .title-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  #ad-sim .title-dot.red { background: #ff5f56; }
+  #ad-sim .title-dot.yellow { background: #ffbd2e; }
+  #ad-sim .title-dot.green { background: #27c93f; }
+  #ad-sim .title-label {
+    flex: 1;
+    text-align: center;
+    color: var(--on-surface-muted);
+    font-size: 12px;
+  }
+
+  #ad-sim .chat-panel {
+    padding: 20px 22px 4px;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--on-surface-secondary);
+  }
+
+  #ad-sim .input-row {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin: 0 0 14px;
+    color: var(--on-surface);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #ad-sim .prompt { color: var(--accent); }
+  #ad-sim .caret {
+    display: inline-block;
+    width: 7px;
+    height: 14px;
+    background: var(--on-surface);
+    animation: simBlink 1s steps(1) infinite;
+    vertical-align: -2px;
+  }
+  @keyframes simBlink { 50% { opacity: 0; } }
+
+  #ad-sim a.link { color: var(--on-surface); text-decoration: none; }
+  #ad-sim a.link:hover { text-decoration: underline; }
+  #ad-sim .brandname { color: var(--secondary); font-weight: 700; }
+  #ad-sim .star {
     color: var(--secondary);
-    background: rgba(0,0,0,0.3);
-    border-top: 1px solid rgba(255,255,255,0.04);
-    position: relative;
+    display: inline-block;
+    animation: simStarPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes simStarPulse {
+    0%, 100% { transform: scale(1) rotate(0deg); opacity: 0.85; }
+    50%      { transform: scale(1.2) rotate(15deg); opacity: 1; text-shadow: 0 0 8px rgba(255,201,0,0.6); }
+  }
+
+  /* transient ad row (surface 1) */
+  #ad-sim .ad-row {
+    padding: 4px 0;
+    margin: 0 0 8px;
+    opacity: 0;
+    transform: translateY(6px);
+    transition: opacity 0.5s ease;
+    border-left: 2px solid var(--secondary);
+    padding-left: 12px;
+  }
+  #ad-sim .ad-row.reveal { animation: simAdIn 0.5s ease forwards; }
+  #ad-sim .ad-row.fade { opacity: 0; }
+  @keyframes simAdIn { to { opacity: 1; transform: translateY(0); } }
+  #ad-sim .ad-row .tip { color: var(--on-surface-muted); font-size: 12.5px; }
+
+  #ad-sim .surface-tag {
+    display: inline-block;
+    color: var(--primary);
+    background: rgba(240,150,228,0.12);
+    border: 1px solid rgba(240,150,228,0.5);
+    border-radius: 20px;
+    padding: 2px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    margin-left: 6px;
+    vertical-align: middle;
+    animation: simTagPulse 2s ease-in-out infinite;
+  }
+  @keyframes simTagPulse {
+    0%, 100% { box-shadow: 0 0 0 rgba(240,150,228,0); opacity: 0.9; }
+    50%      { box-shadow: 0 0 10px rgba(240,150,228,0.45); opacity: 1; }
+  }
+
+  /* generating / streaming response */
+  #ad-sim .gen-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--on-surface-muted);
+    font-size: 12.5px;
+    opacity: 0;
+    height: 0;
+    overflow: hidden;
+  }
+  #ad-sim .gen-status.show { opacity: 1; height: auto; margin-bottom: 6px; }
+  #ad-sim .gen-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    display: inline-block;
+    animation: simDotPulse 1s ease-in-out infinite;
+  }
+  @keyframes simDotPulse {
+    0%, 100% { opacity: 0.4; transform: scale(0.85); }
+    50%      { opacity: 1; transform: scale(1.1); }
+  }
+
+  #ad-sim .response-body { opacity: 0; line-height: 1.4; }
+  #ad-sim .response-body.rendering { opacity: 1; }
+  #ad-sim .response-body .r-line { opacity: 0; transform: translateY(4px); display: block; }
+  #ad-sim .response-body .r-line.shown { animation: simLineIn 0.35s ease forwards; }
+  @keyframes simLineIn { to { opacity: 1; transform: translateY(0); } }
+
+  #ad-sim ol.steps { margin: 4px 0; padding-left: 20px; }
+  #ad-sim ol.steps li { margin-bottom: 2px; }
+  #ad-sim ol.steps li b { color: var(--on-surface); font-weight: 600; }
+  #ad-sim ol.steps ul { margin: 0; padding-left: 16px; color: var(--on-surface-muted); }
+  #ad-sim code.k { color: var(--accent); }
+
+  #ad-sim .followup-row { opacity: 0; margin: 14px 0 0; }
+  #ad-sim .followup-row.show { animation: simFadeIn 0.4s ease forwards; }
+  @keyframes simFadeIn { to { opacity: 1; } }
+
+  /* persistent status bar (surface 2) — same surface, attached under the chat */
+  #ad-sim .status-footer {
+    padding: 4px 22px 18px;
+    font-size: 13px;
+  }
+  #ad-sim .status-footer .bar {
+    color: var(--secondary);
+    display: inline-flex;
+    width: fit-content;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0 3px;
+    border-bottom: 2px solid var(--secondary);
     cursor: pointer;
   }
-
-  .statusline-bar:hover .statusline-tooltip {
-    opacity: 1;
-    transform: translateY(0);
+  #ad-sim .brand-logo {
+    width: 15px;
+    height: 15px;
+    border-radius: 4px;
+    background: var(--secondary);
+    display: inline-block;
+    flex-shrink: 0;
   }
-
-  .statusline-icon {
-    font-size: 10px;
-    background: rgba(255, 201, 0, 0.15);
-    border: 1px solid rgba(255, 201, 0, 0.2);
+  #ad-sim .status-footer a.brandname {
     color: var(--secondary);
-    border-radius: 3px;
-    padding: 1px 4px;
-    letter-spacing: 0.5px;
+    font-weight: 700;
+    text-decoration: none;
   }
-
-  .statusline-dot {
-    color: var(--on-surface-muted);
-    margin: 0 2px;
-  }
-
-  .statusline-mode {
-    color: var(--accent);
-    margin-left: auto;
-    font-size: 12px;
-    opacity: 0.8;
-  }
-
-  .statusline-tooltip {
-    position: absolute;
-    bottom: calc(100% + 4px);
-    left: 16px;
-    background: #2d5ca0;
-    color: #7ab3f5;
-    padding: 5px 12px;
-    border-radius: 6px;
-    font-size: 12.5px;
-    white-space: nowrap;
-    opacity: 0;
-    transform: translateY(4px);
-    transition: all 0.2s ease;
-    pointer-events: none;
-    border: 1px solid rgba(100, 160, 255, 0.3);
-  }
+  #ad-sim .status-footer .tag-row { margin-top: 8px; }
 
   @keyframes rotate {
     to { transform: rotate(360deg); }
@@ -946,48 +936,62 @@ export const LANDING_HTML = `<!doctype html>
       </div>
     </div>
 
-    <!-- Terminal Animation Simulator (full-row, big box) -->
+    <!-- "How ads appear" simulator: two surfaces inside one window -->
     <div class="card full-row" id="ad-sim">
       <div class="lbl">How Ads Appear in Claude Code</div>
-      
-      <div class="terminal-surfaces">
+      <p class="sim-sub">
+        Ads appear on <b>two interfaces</b> &mdash; a <b>transient line</b> while Claude thinks,
+        and a <b>persistent status bar</b> under your chat. Nothing ever interrupts the answer.
+      </p>
 
-        <!-- Surface 1: Spinner (transient, shown during thinking) — animated -->
-        <div>
-          <div class="surface-label">Surface 1 · Thinking (transient)</div>
-          <div class="terminal-box" id="sim-box">
-            <div class="terminal-header">
-              <div class="dot dot-red"></div>
-              <div class="dot dot-yellow"></div>
-              <div class="dot dot-green"></div>
-              <span style="margin-left: auto; font-size: 11px; opacity: 0.5;">claude-code-spinner</span>
-            </div>
-            <div class="terminal-screen" id="sim-screen">
-              <!-- JS-driven animation renders here -->
-            </div>
-          </div>
+      <div class="app-window">
+
+        <div class="title-bar">
+          <span class="title-dot red"></span>
+          <span class="title-dot yellow"></span>
+          <span class="title-dot green"></span>
+          <span class="title-label">project-ads</span>
         </div>
 
-        <!-- Surface 2: Statusline (persistent, always below chat) -->
-        <div>
-          <div class="surface-label">Surface 2 · Persistent status bar</div>
-          <div class="statusline-box">
-            <div class="statusline-chat">
-              <span class="statusline-prompt-arrow">›</span>
-              <div>
-                <div style="color: var(--on-surface); font-size: 13px;">What's the best way to handle DB migrations?</div>
-              </div>
+        <div class="chat-panel">
+          <div class="input-row"><span class="prompt">&gt;</span> how to setup payments in my app<span class="caret"></span></div>
+
+          <!-- Surface 1: transient ad, only while thinking -->
+          <div class="ad-row" id="sim-ad">
+            <div>
+              <span class="star">&#9733;</span>
+              <span class="brandname">Stripe</span> &middot; powering payments for great products
+              <span class="surface-tag">Thinking &middot; transient</span>
             </div>
-            <div class="statusline-bar" title="hover to see URL">
-              <div class="statusline-tooltip">https://ramp.com (cmd + click)</div>
-              <span class="statusline-icon">AD</span>
-              <span style="color: var(--on-surface-muted);">—·</span>
-              <span style="color: var(--secondary); font-weight: 600;">Ramp</span>
-              <span class="statusline-dot">·</span>
-              <span style="color: var(--secondary);">save time on expenses</span>
-              <span class="statusline-mode">&gt;&gt; auto mode on (shift+tab to cycle) · ← 1 agent</span>
-            </div>
+            <div class="tip">&#9492; tip: secure, reliable payments with Stripe or Razorpay</div>
           </div>
+
+          <div class="gen-status" id="sim-gen">
+            <span class="gen-dot"></span> Generating response&hellip;
+          </div>
+
+          <div class="response-body" id="sim-response">Here&rsquo;s a quick way to set up payments in your app:
+            <ol class="steps">
+              <li class="r-line"><b>Choose a payment provider</b><ul><li><a class="link" href="#">Stripe</a> or <a class="link" href="#">Razorpay</a> are great options.</li></ul></li>
+              <li class="r-line"><b>Sign up &amp; get API keys</b><ul><li>Create an account and grab your <code class="k">publishable</code> and <code class="k">secret</code> keys.</li></ul></li>
+              <li class="r-line"><b>Integrate the SDK</b><ul><li>Use the official SDK for your platform (web, iOS, Android).</li></ul></li>
+              <li class="r-line"><b>Build the payment flow</b><ul><li>Collect payment details securely through their UI.</li></ul></li>
+              <li class="r-line"><b>Handle webhooks</b><ul><li>Set up endpoints to listen for payment events.</li></ul></li>
+            </ol>
+            <span class="r-line">Need code examples for <a class="link" href="#">Stripe</a> or <a class="link" href="#">Razorpay</a>?</span>
+          </div>
+
+          <div class="input-row followup-row" id="sim-followup"><span class="prompt">&gt;</span> <span id="sim-typed"></span><span class="caret"></span></div>
+        </div>
+
+        <!-- Surface 2: persistent status bar, never goes away -->
+        <div class="status-footer">
+          <div class="bar" title="cmd + click to open">
+            <span class="brand-logo"></span>
+            <a class="link brandname" href="https://stripe.com" target="_blank" rel="noopener">Stripe</a>
+            <span>&middot; powering payments for great products</span>
+          </div>
+          <div class="tag-row"><span class="surface-tag">Status bar &middot; persistent</span></div>
         </div>
 
       </div>
@@ -1015,75 +1019,62 @@ export const LANDING_HTML = `<!doctype html>
 </div>
 
 <script>
-// ── Terminal Simulation: Surface 1 (spinner / transient) ──
+// ── "How ads appear" simulator: transient ad + persistent status bar ──
 (function() {
-  var screen = document.getElementById('sim-screen');
-  if (!screen) return;
+  var ad = document.getElementById('sim-ad');
+  var gen = document.getElementById('sim-gen');
+  var body = document.getElementById('sim-response');
+  var followup = document.getElementById('sim-followup');
+  var typed = document.getElementById('sim-typed');
+  if (!ad || !gen || !body || !followup || !typed) return;
 
-  var C = '#34A8A2';   // accent
-  var Y = '#FFC900';   // secondary / ad color
-  var M = '#71717a';   // muted
+  var lines = body.querySelectorAll('.r-line');
+  var FOLLOWUP = 'I want to go ahead with Stripe';
 
-  function el(tag, html, style) {
-    var d = document.createElement(tag);
-    if (html) d.innerHTML = html;
-    if (style) d.style.cssText = style;
-    return d;
+  function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
+
+  function reset() {
+    ad.classList.remove('reveal', 'fade');
+    gen.classList.remove('show');
+    body.classList.remove('rendering');
+    followup.classList.remove('show');
+    typed.textContent = '';
+    for (var i = 0; i < lines.length; i++) lines[i].classList.remove('shown');
   }
 
-  function sleep(ms) { return new Promise(function(r){ setTimeout(r, ms); }); }
-
-  var ads = [
-    { brand: 'Ramp', copy: 'save time on expenses\u2026' },
-    { brand: 'Neon DB', copy: 'scale Postgres to zero\u2026' },
-    { brand: 'Warp', copy: 'the terminal for the AI age\u2026' },
-  ];
-  var adIdx = 0;
+  async function typeText(text, speed) {
+    for (var i = 0; i < text.length; i++) {
+      typed.textContent = text.slice(0, i + 1);
+      await sleep(speed);
+    }
+  }
 
   async function runLoop() {
     while (true) {
-      screen.innerHTML = '';
+      reset();
+      await sleep(900);
 
-      // Step 1: prompt line
-      var promptLine = el('div',
-        '<span style="color:' + C + ';font-size:15px">\u203a</span>&nbsp;<span style="color:#fff">write me a db migration script</span>',
-        'display:flex;align-items:center;gap:8px;'
-      );
-      screen.appendChild(promptLine);
-      await sleep(400);
-
-      // Step 2: churning indicator (counts up)
-      var churnLine = el('div', '', 'color:' + M + ';');
-      screen.appendChild(churnLine);
-      for (var i = 1; i <= 6; i++) {
-        await sleep(500);
-        churnLine.innerHTML = '<span style="color:' + C + '">*</span> Churned for ' + i + 's';
-      }
-
-      // Step 3: ad fades in
-      var ad = ads[adIdx % ads.length]; adIdx++;
-      var adLine = el('div',
-        '<span style="color:' + Y + '">\u00b7</span>&nbsp;<span style="color:' + Y + ';font-weight:700">' + ad.brand + '</span>&nbsp;<span style="color:' + M + '">\u00b7</span>&nbsp;<span style="color:' + Y + '">' + ad.copy + '</span>',
-        'border-left:2px solid ' + Y + ';padding-left:14px;margin-top:4px;opacity:0;transition:opacity 0.7s ease;'
-      );
-      screen.appendChild(adLine);
-      await sleep(80);
-      adLine.style.opacity = '1';
-      await sleep(2200);
-
-      // Step 4: response arrives — ad disappears, response shown
-      adLine.style.opacity = '0';
+      // surface 1: ad appears while Claude is thinking
+      ad.classList.add('reveal');
       await sleep(600);
-      screen.removeChild(adLine);
+      gen.classList.add('show');
+      await sleep(1400);
 
-      var respLine = el('div',
-        '<span style="color:' + M + '">\u2514 Here\u2019s your migration script\u2026</span>',
-        'padding-left:20px;font-size:12px;opacity:0;transition:opacity 0.5s;'
-      );
-      screen.appendChild(respLine);
-      await sleep(80);
-      respLine.style.opacity = '1';
-      await sleep(1800);
+      // answer streams in — the transient ad steps aside
+      body.classList.add('rendering');
+      ad.classList.add('fade');
+      for (var i = 0; i < lines.length; i++) {
+        lines[i].classList.add('shown');
+        await sleep(260);
+      }
+      gen.classList.remove('show');
+      await sleep(500);
+
+      // user replies — status bar ad has been there the whole time
+      followup.classList.add('show');
+      await sleep(300);
+      await typeText(FOLLOWUP, 45);
+      await sleep(3200);
     }
   }
 
