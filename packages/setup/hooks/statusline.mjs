@@ -30,7 +30,7 @@ try {
   if (output) process.stdout.write(output)
   else throw new Error('no frame')
 } catch {
-  process.stdout.write('📢 Ramp · save time on expenses')
+  process.stdout.write('📢 Project Ads · reach devs in their terminal')
 }
 
 // Idle gate: only log impression if idle > 5 min
