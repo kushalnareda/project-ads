@@ -1147,28 +1147,12 @@ function smoothScrollInstall(e) {
 
 var _copyTimeout = null;
 
-function copySetup() {
-  var cmd = document.getElementById('cmd-text').textContent.trim();
+function showCopyFeedback() {
   var btn = document.getElementById('copy-btn');
   var label = document.getElementById('copy-label');
   var iconClipboard = document.getElementById('icon-clipboard');
   var iconCheck = document.getElementById('icon-check');
 
-  // Write to clipboard (best effort)
-  try {
-    var ta = document.createElement('textarea');
-    ta.value = cmd;
-    ta.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-  } catch(e) {}
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(cmd).catch(function(){});
-  }
-
-  // Show feedback — toggle SVG groups, no innerHTML needed
   if (!btn || !label || !iconClipboard || !iconCheck) return;
   if (_copyTimeout) clearTimeout(_copyTimeout);
 
@@ -1184,6 +1168,38 @@ function copySetup() {
     label.textContent = 'Copy';
     _copyTimeout = null;
   }, 2000);
+}
+
+function copySetup() {
+  var cmd = document.getElementById('cmd-text').textContent.trim();
+
+  // Try modern clipboard API first (preferred, works reliably)
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(cmd).then(function() {
+      showCopyFeedback();
+    }).catch(function(err) {
+      // Fallback to old method if modern API fails
+      copyViaExecCommand(cmd);
+    });
+  } else {
+    // Fallback for older browsers
+    copyViaExecCommand(cmd);
+  }
+}
+
+function copyViaExecCommand(cmd) {
+  try {
+    var ta = document.createElement('textarea');
+    ta.value = cmd;
+    ta.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showCopyFeedback();
+  } catch(e) {
+    console.error('Copy failed:', e);
+  }
 }
 
 
@@ -1252,6 +1268,15 @@ function resize() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
 }
+// Make entire command box clickable for copy
+document.addEventListener('DOMContentLoaded', function() {
+  var codeContainer = document.querySelector('.code-container');
+  if (codeContainer) {
+    codeContainer.style.cursor = 'pointer';
+    codeContainer.addEventListener('click', copySetup);
+  }
+});
+
 window.addEventListener('resize', resize);
 resize();
 
