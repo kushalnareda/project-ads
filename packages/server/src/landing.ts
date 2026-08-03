@@ -702,7 +702,18 @@ export const LANDING_HTML = `<!doctype html>
     font-weight: 700;
     text-decoration: none;
   }
-  #ad-sim .status-footer .tag-row { margin-top: 8px; }
+  @media (max-width: 640px) {
+    #ad-sim .chat-panel { padding: 16px 14px 4px; font-size: 12.5px; }
+    #ad-sim .status-footer { padding: 4px 14px 16px; font-size: 12px; }
+    #ad-sim .surface-tag { font-size: 10px; padding: 2px 8px; }
+  }
+
+  #ad-sim .status-footer .sl-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+  }
 
   @keyframes rotate {
     to { transform: rotate(360deg); }
@@ -999,12 +1010,14 @@ export const LANDING_HTML = `<!doctype html>
 
         <!-- Surface 2: persistent status bar, never goes away -->
         <div class="status-footer">
-          <div class="sl-bar" title="cmd + click to open">
-            <span class="brand-logo"></span>
-            <a class="link brandname" href="https://stripe.com" target="_blank" rel="noopener">Stripe</a>
-            <span>&middot; powering payments for great products</span>
+          <div class="sl-row">
+            <div class="sl-bar" title="cmd + click to open">
+              <span class="brand-logo"></span>
+              <a class="link brandname" href="https://stripe.com" target="_blank" rel="noopener">Stripe</a>
+              <span>&middot; powering payments for great products</span>
+            </div>
+            <span class="surface-tag">Status bar &middot; persistent</span>
           </div>
-          <div class="tag-row"><span class="surface-tag">Status bar &middot; persistent</span></div>
         </div>
 
       </div>
