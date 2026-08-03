@@ -1077,7 +1077,7 @@ export const LANDING_HTML = `<!doctype html>
       screen.removeChild(adLine);
 
       var respLine = el('div',
-        '<span style="color:' + M + '">\u2514 Here\'s your migration script\u2026</span>',
+        '<span style="color:' + M + '">\u2514 Here\u2019s your migration script\u2026</span>',
         'padding-left:20px;font-size:12px;opacity:0;transition:opacity 0.5s;'
       );
       screen.appendChild(respLine);
