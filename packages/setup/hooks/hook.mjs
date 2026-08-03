@@ -9,6 +9,7 @@ const CONFIG      = join(DIR, 'config.json')
 const WALLET      = join(DIR, 'wallet.json')
 const RATE_FILE   = join(DIR, '.last-impression')
 const SETTINGS    = join(homedir(), '.claude', 'settings.json')
+const SPINNER_PENDING = join(DIR, 'spinner-pending.json')
 const AD_URL      = process.env.PROJECT_ADS_URL ?? 'https://project-ads.fly.dev/v1/impression'
 const RATE_MS     = 5_000
 
@@ -68,11 +69,12 @@ try {
 // accrued for the spinner here. The ad has not rendered yet at this point,
 // and may never render if the user does not start another session. Billing
 // the 'claude-code-spinner' surface (SURFACE_FRACTION 1.0) at write time
-// would charge advertisers for impressions that never happened. Whoever
-// wires up spinner billing must do it when the verb is actually on screen.
-syncSpinnerVerb(data.ad_text)
+// would charge advertisers for impressions that never happened. Instead we
+// note which campaign was staged; spinner-confirm.mjs bills it at session
+// start, once the verb is genuinely on screen.
+syncSpinnerVerb(data.ad_text, data.campaign_id)
 
-function syncSpinnerVerb(adText) {
+function syncSpinnerVerb(adText, campaignId) {
   try {
     // Read-modify-write of a file the user owns and other tools also write.
     // Never create it — absence means Claude Code is not configured here, and
@@ -95,6 +97,18 @@ function syncSpinnerVerb(adText) {
     const tmp = `${SETTINGS}.project-ads.tmp`
     writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n')
     renameSync(tmp, SETTINGS)
+
+    // Record what we staged so the session-start hook can bill the right
+    // campaign. Written only after the settings swap succeeded — claiming a
+    // render for an ad we failed to install would be a false impression.
+    // No campaign_id (older server, or the env default ad) means unbillable,
+    // so clear any stale record rather than leaving the previous one to be
+    // matched against a verb it no longer corresponds to.
+    const pendingTmp = `${SPINNER_PENDING}.tmp`
+    writeFileSync(pendingTmp, JSON.stringify(
+      campaignId ? { campaign_id: campaignId, ad_text: adText, staged_at: now } : {},
+    ))
+    renameSync(pendingTmp, SPINNER_PENDING)
   } catch {
     // Unreadable, malformed, or unwritable settings.json — leave it alone.
   }
