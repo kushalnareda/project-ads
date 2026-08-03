@@ -873,13 +873,9 @@ export const LANDING_HTML = `<!doctype html>
       </p>
     </div>
     
-    <form id="signup-form" onsubmit="submitAdvertiser(event)">
-      <div class="input-wrapper">
-        <input type="text" id="company" required placeholder="Company Name" class="input">
-        <input type="email" id="email" required placeholder="your@company.com" class="input">
-        <button class="btn" type="submit" id="submit-btn">Join Advertiser Waitlist</button>
-      </div>
-    </form>
+    <div style="margin-top: 12px; width: 100%; display: flex; justify-content: center;">
+      <button class="btn" id="submit-btn" onclick="advertisePrompt()" style="padding: 16px 32px; font-size: 16px; border-radius: 12px; font-weight: 600; cursor: pointer; transition: var(--transition);">Click here if you want to advertise</button>
+    </div>
   </div>
 
   <!-- Grid Structure: Launch Progress (full) → CLI + Ad Sim (2-col) -->
@@ -1001,7 +997,7 @@ export const LANDING_HTML = `<!doctype html>
     <p class="desc" style="max-width: 500px; font-size: 15px;">
       Looking to configure direct campaigns or custom terminal integrations? Contact our team.
     </p>
-    <a href="mailto:kushalsinghnareda@gmail.com" class="btn btn-outline" style="border-radius: 12px; font-size: 14px; padding: 12px 28px;">Contact Advertisers Team</a>
+    <a href="mailto:kushalsinghnareda@gmail.com" class="btn btn-outline" style="border-radius: 12px; font-size: 14px; padding: 12px 28px;">Contact Team</a>
   </div>
 
   <footer>
@@ -1009,6 +1005,7 @@ export const LANDING_HTML = `<!doctype html>
     <div>
       <a href="/dashboard">Publisher Dashboard</a>
       <a href="mailto:kushalsinghnareda@gmail.com">Advertiser Portal</a>
+      <a href="https://www.linkedin.com/in/kushal-singh-nareda-4a4890213/" target="_blank" rel="noopener noreferrer">LinkedIn</a>
     </div>
   </footer>
 
@@ -1205,15 +1202,29 @@ function copyViaExecCommand(cmd) {
 
 
 // Submit Advertiser Waitlist Registration (Main form at top)
-async function submitAdvertiser(e) {
-  e.preventDefault();
-  var email = document.getElementById('email').value;
-  var company = document.getElementById('company').value;
+async function advertisePrompt() {
+  var company = prompt("Enter your Company Name:");
+  if (company === null) return;
+  company = company.trim();
+  if (!company) {
+    alert("Company Name is required.");
+    return;
+  }
+
+  var email = prompt("Enter your email address:");
+  if (email === null) return;
+  email = email.trim();
+  if (!email) {
+    alert("Email address is required.");
+    return;
+  }
+
   var btn = document.getElementById('submit-btn');
-  
-  btn.disabled = true;
-  btn.textContent = 'Joining Waitlist...';
-  
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Joining Waitlist...';
+  }
+
   try {
     var res = await fetch('/v1/advertiser/register', {
       method: 'POST',
@@ -1226,13 +1237,17 @@ async function submitAdvertiser(e) {
       triggerConfetti();
     } else {
       alert(data.error || 'Failed to join waitlist.');
-      btn.disabled = false;
-      btn.textContent = 'Join Advertiser Waitlist';
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Click here if you want to advertise';
+      }
     }
   } catch (err) {
     alert('Network error. Please try again.');
-    btn.disabled = false;
-    btn.textContent = 'Join Advertiser Waitlist';
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Click here if you want to advertise';
+    }
   }
 }
 
