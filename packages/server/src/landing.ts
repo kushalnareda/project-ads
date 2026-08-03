@@ -600,7 +600,6 @@ export const LANDING_HTML = `<!doctype html>
     padding-left: 12px;
   }
   #ad-sim .ad-row.reveal { opacity: 1; transform: translateY(0); }
-  #ad-sim .ad-row.fade { opacity: 0; }
   #ad-sim .ad-row .tip { color: var(--on-surface-muted); font-size: 12.5px; }
 
   #ad-sim .surface-tag {
@@ -1060,7 +1059,7 @@ export const LANDING_HTML = `<!doctype html>
   function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 
   function reset() {
-    ad.classList.remove('reveal', 'fade');
+    ad.classList.remove('reveal');
     gen.classList.remove('show');
     body.classList.remove('rendering');
     followup.classList.remove('show');
@@ -1087,10 +1086,9 @@ export const LANDING_HTML = `<!doctype html>
       gen.classList.add('show');
       await sleep(900);
 
-      // answer streams in — the transient ad steps aside
+      // answer streams in; the ad line stays put for the whole cycle so the
+      // surface it lives on is readable at any moment of the loop
       body.classList.add('rendering');
-      ad.classList.remove('reveal');
-      ad.classList.add('fade');
       for (var i = 0; i < lines.length; i++) {
         lines[i].classList.add('shown');
         await sleep(300);
