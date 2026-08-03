@@ -11,7 +11,7 @@ export const LANDING_HTML = `<!doctype html>
 <style>
   :root {
     --primary: #F096E4;
-    --secondary: #FFC900;
+    --secondary: #F45BB5;
     --accent: #34A8A2;
     --background: #09090b;
     --surface: rgba(22, 22, 26, 0.7);
@@ -391,8 +391,8 @@ export const LANDING_HTML = `<!doctype html>
   .fill {
     width: 0%;
     height: 100%;
-    background: linear-gradient(90deg, var(--secondary) 0%, #ff8c00 100%);
-    box-shadow: 0 0 10px rgba(255, 201, 0, 0.4);
+    background: linear-gradient(90deg, var(--secondary) 0%, #ff4fa3 100%);
+    box-shadow: 0 0 10px rgba(244, 91, 181, 0.4);
     border-radius: 99px;
     transition: width 1.8s cubic-bezier(0.16, 1, 0.3, 1);
   }
@@ -979,12 +979,12 @@ export const LANDING_HTML = `<!doctype html>
               </div>
             </div>
             <div class="statusline-bar" title="hover to see URL">
-              <div class="statusline-tooltip">https://ramp.com (cmd + click)</div>
+              <div class="statusline-tooltip">https://github.com/kushalnareda/project-ads (cmd + click)</div>
               <span class="statusline-icon">AD</span>
               <span style="color: var(--on-surface-muted);">—·</span>
-              <span style="color: var(--secondary); font-weight: 600;">Ramp</span>
+              <span style="color: var(--secondary); font-weight: 600;">Project Ads</span>
               <span class="statusline-dot">·</span>
-              <span style="color: var(--secondary);">save time on expenses</span>
+              <span style="color: var(--secondary);">reach devs in their terminal</span>
               <span class="statusline-mode">&gt;&gt; auto mode on (shift+tab to cycle) · ← 1 agent</span>
             </div>
           </div>
@@ -1021,7 +1021,7 @@ export const LANDING_HTML = `<!doctype html>
   if (!screen) return;
 
   var C = '#34A8A2';   // accent
-  var Y = '#FFC900';   // secondary / ad color
+  var Y = '#F45BB5';   // secondary / ad color
   var M = '#71717a';   // muted
 
   function el(tag, html, style) {
@@ -1034,7 +1034,7 @@ export const LANDING_HTML = `<!doctype html>
   function sleep(ms) { return new Promise(function(r){ setTimeout(r, ms); }); }
 
   var ads = [
-    { brand: 'Ramp', copy: 'save time on expenses\u2026' },
+    { brand: 'Project Ads', copy: 'reach devs in their terminal\u2026' },
     { brand: 'Neon DB', copy: 'scale Postgres to zero\u2026' },
     { brand: 'Warp', copy: 'the terminal for the AI age\u2026' },
   ];
