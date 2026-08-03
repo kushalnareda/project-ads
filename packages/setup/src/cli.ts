@@ -13,12 +13,14 @@ const ADS_DIR  = join(HOME, '.project-ads')
 const CONFIG   = join(ADS_DIR, 'config.json')
 const HOOK     = join(ADS_DIR, 'hook.mjs')
 const TOKEN_SERVER = join(ADS_DIR, 'token-server.mjs')
+const SPINNER_CONFIRM = join(ADS_DIR, 'spinner-confirm.mjs')
 const SL_HOOK  = join(HOME, '.claude', 'hooks', 'project-ads-statusline.mjs')
 const SETTINGS = join(HOME, '.claude', 'settings.json')
 
 const HOOK_SRC         = join(__dirname, '..', 'hooks', 'hook.mjs')
 const SL_SRC           = join(__dirname, '..', 'hooks', 'statusline.mjs')
 const TOKEN_SERVER_SRC = join(__dirname, '..', 'hooks', 'token-server.mjs')
+const SPINNER_CONFIRM_SRC = join(__dirname, '..', 'hooks', 'spinner-confirm.mjs')
 
 // Standard acquisition channels for a developer tool.
 const HEARD_FROM_OPTIONS = [
@@ -89,6 +91,9 @@ async function main() {
   copyFileSync(TOKEN_SERVER_SRC, TOKEN_SERVER)
   console.log(`✓ ${TOKEN_SERVER}`)
 
+  copyFileSync(SPINNER_CONFIRM_SRC, SPINNER_CONFIRM)
+  console.log(`✓ ${SPINNER_CONFIRM}`)
+
   wireSettings()
   console.log(`✓ ${SETTINGS}`)
 
@@ -113,6 +118,9 @@ function updateHooks() {
 
   copyFileSync(TOKEN_SERVER_SRC, TOKEN_SERVER)
   console.log(`✓ ${TOKEN_SERVER}`)
+
+  copyFileSync(SPINNER_CONFIRM_SRC, SPINNER_CONFIRM)
+  console.log(`✓ ${SPINNER_CONFIRM}`)
 
   wireSettings()
   console.log(`✓ ${SETTINGS}`)
@@ -187,6 +195,8 @@ function wireSettings() {
 
   addHookIfMissing(hooks, 'UserPromptSubmit', `node "${HOOK}"`, 5)
   addHookIfMissing(hooks, 'Stop', `node "${SL_HOOK}"`, 5)
+  // Bills the ambient ad once Claude Code has loaded it into the spinner.
+  addHookIfMissing(hooks, 'SessionStart', `node "${SPINNER_CONFIRM}"`, 5)
 
   writeFileSync(SETTINGS, JSON.stringify(settings, null, 2) + '\n')
 }
