@@ -16,6 +16,7 @@ export const STATS_HTML = `<!doctype html>
   @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.3} }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; max-width: 560px; }
   .card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 22px 20px; }
+  .card.full { grid-column: span 2; }
   .num { font-size: 38px; font-weight: 700; letter-spacing: -1.5px; line-height: 1; }
   .num.green { color: #3fb950; }
   .lbl { font-size: 11px; color: #7d8590; margin-top: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -40,19 +41,14 @@ export const STATS_HTML = `<!doctype html>
     <div class="sub" id="publishers_sub"></div>
   </div>
   <div class="card">
-    <div class="num" id="impressions">—</div>
-    <div class="lbl">impressions served</div>
-    <div class="sub" id="impressions_sub"></div>
-  </div>
-  <div class="card">
-    <div class="num green" id="credits">—</div>
-    <div class="lbl">usd distributed</div>
-    <div class="sub"></div>
-  </div>
-  <div class="card">
     <div class="num" id="campaigns">—</div>
     <div class="lbl">active campaigns</div>
     <div class="sub"></div>
+  </div>
+  <div class="card full">
+    <div class="num" id="impressions">—</div>
+    <div class="lbl">impressions served</div>
+    <div class="sub" id="impressions_sub"></div>
   </div>
 </div>
 
@@ -101,7 +97,6 @@ async function refresh() {
     var w7 = d.impressions_last_7_days || 0
     document.getElementById('impressions_sub').textContent = w7 > 0 ? '+' + fmt(w7) + ' this week' : ''
 
-    document.getElementById('credits').textContent = '$' + (d.credits_distributed || 0).toFixed(2)
     document.getElementById('campaigns').textContent = String(d.active_campaigns || 0)
 
     drawSpark(d.daily_impressions || {})
