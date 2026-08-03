@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsup && node scripts/copy-website.js",
+    "build": "tsup",
     "start": "node dist/index.js",
     "dev": "tsup --watch & node --watch dist/index.js",
     "test": "vitest run"

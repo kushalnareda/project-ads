@@ -5,10 +5,6 @@
     "packages/sdk",
     "packages/server",
     "packages/setup",
-    "packages/mcp",
-    "packages/website"
-  ],
-  "scripts": {
-    "build": "npm run build --prefix packages/website && npm run build -w @project-ads/agent-ads -w @project-ads/ad-server -w @project-ads/setup -w @project-ads/mcp --if-present"
-  }
+    "packages/mcp"
+  ]
 }
