@@ -548,7 +548,7 @@ export const LANDING_HTML = `<!doctype html>
 
   #ad-sim .chat-panel {
     transition: opacity 0.45s ease;
-    min-height: 132px;
+    min-height: 376px;
     padding: 20px 22px 4px;
     font-size: 13.5px;
     line-height: 1.55;
@@ -599,10 +599,8 @@ export const LANDING_HTML = `<!doctype html>
     border-left: 2px solid var(--secondary);
     padding-left: 12px;
   }
-  #ad-sim .ad-row.reveal { animation: simAdIn 0.5s ease forwards; }
+  #ad-sim .ad-row.reveal { opacity: 1; transform: translateY(0); }
   #ad-sim .ad-row.fade { opacity: 0; }
-  #ad-sim .ad-row.gone { display: none; }
-  @keyframes simAdIn { to { opacity: 1; transform: translateY(0); } }
   #ad-sim .ad-row .tip { color: var(--on-surface-muted); font-size: 12.5px; }
 
   #ad-sim .surface-tag {
@@ -632,11 +630,13 @@ export const LANDING_HTML = `<!doctype html>
     gap: 8px;
     color: var(--on-surface-muted);
     font-size: 12.5px;
+    height: 22px;
+    margin-bottom: 6px;
     opacity: 0;
-    height: 0;
     overflow: hidden;
+    transition: opacity 0.4s ease;
   }
-  #ad-sim .gen-status.show { opacity: 1; height: auto; margin-bottom: 6px; }
+  #ad-sim .gen-status.show { opacity: 1; }
   #ad-sim .gen-dot {
     width: 7px;
     height: 7px;
@@ -650,8 +650,8 @@ export const LANDING_HTML = `<!doctype html>
     50%      { opacity: 1; transform: scale(1.1); }
   }
 
-  #ad-sim .response-body { display: none; opacity: 0; line-height: 1.4; }
-  #ad-sim .response-body.rendering { display: block; opacity: 1; }
+  #ad-sim .response-body { opacity: 0; line-height: 1.4; transition: opacity 0.4s ease; }
+  #ad-sim .response-body.rendering { opacity: 1; }
   #ad-sim .response-body .r-line { opacity: 0; transform: translateY(4px); display: block; }
   #ad-sim .response-body li.r-line { display: list-item; }
   #ad-sim .response-body .r-line.shown { animation: simLineIn 0.35s ease forwards; }
@@ -665,9 +665,8 @@ export const LANDING_HTML = `<!doctype html>
 
   #ad-sim .chat-panel.clearing { opacity: 0; }
 
-  #ad-sim .followup-row { display: none; opacity: 0; margin: 14px 0 0; }
-  #ad-sim .followup-row.show { display: flex; animation: simFadeIn 0.4s ease forwards; }
-  @keyframes simFadeIn { to { opacity: 1; } }
+  #ad-sim .followup-row { opacity: 0; margin: 14px 0 0; transition: opacity 0.45s ease; }
+  #ad-sim .followup-row.show { opacity: 1; }
 
   /* persistent status bar (surface 2) — same surface, attached under the chat */
   #ad-sim .status-footer {
@@ -703,7 +702,7 @@ export const LANDING_HTML = `<!doctype html>
     text-decoration: none;
   }
   @media (max-width: 640px) {
-    #ad-sim .chat-panel { padding: 16px 14px 4px; font-size: 12.5px; }
+    #ad-sim .chat-panel { padding: 16px 14px 4px; font-size: 12.5px; min-height: 470px; }
     #ad-sim .status-footer { padding: 4px 14px 16px; font-size: 12px; }
     #ad-sim .surface-tag { font-size: 10px; padding: 2px 8px; }
   }
@@ -1061,7 +1060,7 @@ export const LANDING_HTML = `<!doctype html>
   function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 
   function reset() {
-    ad.classList.remove('reveal', 'fade', 'gone');
+    ad.classList.remove('reveal', 'fade');
     gen.classList.remove('show');
     body.classList.remove('rendering');
     followup.classList.remove('show');
@@ -1080,24 +1079,23 @@ export const LANDING_HTML = `<!doctype html>
     reset();
     while (true) {
       panel.classList.remove('clearing');
-      await sleep(700);
+      await sleep(500);
 
       // surface 1: ad appears while Claude is thinking
       ad.classList.add('reveal');
-      await sleep(600);
+      await sleep(500);
       gen.classList.add('show');
-      await sleep(1400);
+      await sleep(900);
 
       // answer streams in — the transient ad steps aside
       body.classList.add('rendering');
-      ad.classList.remove('reveal');   // drop the forwards-filled reveal so the fade can win
+      ad.classList.remove('reveal');
       ad.classList.add('fade');
       for (var i = 0; i < lines.length; i++) {
         lines[i].classList.add('shown');
-        await sleep(260);
+        await sleep(300);
       }
       gen.classList.remove('show');
-      ad.classList.add('gone');   // transient line is done: reclaim its space
       await sleep(500);
 
       // user replies — status bar ad has been there the whole time
