@@ -547,6 +547,8 @@ export const LANDING_HTML = `<!doctype html>
   }
 
   #ad-sim .chat-panel {
+    transition: opacity 0.45s ease;
+    min-height: 132px;
     padding: 20px 22px 4px;
     font-size: 13.5px;
     line-height: 1.55;
@@ -593,12 +595,13 @@ export const LANDING_HTML = `<!doctype html>
     margin: 0 0 8px;
     opacity: 0;
     transform: translateY(6px);
-    transition: opacity 0.5s ease;
+    transition: opacity 0.5s ease, transform 0.5s ease;
     border-left: 2px solid var(--secondary);
     padding-left: 12px;
   }
   #ad-sim .ad-row.reveal { animation: simAdIn 0.5s ease forwards; }
   #ad-sim .ad-row.fade { opacity: 0; }
+  #ad-sim .ad-row.gone { display: none; }
   @keyframes simAdIn { to { opacity: 1; transform: translateY(0); } }
   #ad-sim .ad-row .tip { color: var(--on-surface-muted); font-size: 12.5px; }
 
@@ -647,9 +650,10 @@ export const LANDING_HTML = `<!doctype html>
     50%      { opacity: 1; transform: scale(1.1); }
   }
 
-  #ad-sim .response-body { opacity: 0; line-height: 1.4; }
-  #ad-sim .response-body.rendering { opacity: 1; }
+  #ad-sim .response-body { display: none; opacity: 0; line-height: 1.4; }
+  #ad-sim .response-body.rendering { display: block; opacity: 1; }
   #ad-sim .response-body .r-line { opacity: 0; transform: translateY(4px); display: block; }
+  #ad-sim .response-body li.r-line { display: list-item; }
   #ad-sim .response-body .r-line.shown { animation: simLineIn 0.35s ease forwards; }
   @keyframes simLineIn { to { opacity: 1; transform: translateY(0); } }
 
@@ -659,8 +663,10 @@ export const LANDING_HTML = `<!doctype html>
   #ad-sim ol.steps ul { margin: 0; padding-left: 16px; color: var(--on-surface-muted); }
   #ad-sim code.k { color: var(--accent); }
 
-  #ad-sim .followup-row { opacity: 0; margin: 14px 0 0; }
-  #ad-sim .followup-row.show { animation: simFadeIn 0.4s ease forwards; }
+  #ad-sim .chat-panel.clearing { opacity: 0; }
+
+  #ad-sim .followup-row { display: none; opacity: 0; margin: 14px 0 0; }
+  #ad-sim .followup-row.show { display: flex; animation: simFadeIn 0.4s ease forwards; }
   @keyframes simFadeIn { to { opacity: 1; } }
 
   /* persistent status bar (surface 2) — same surface, attached under the chat */
@@ -668,16 +674,20 @@ export const LANDING_HTML = `<!doctype html>
     padding: 4px 22px 18px;
     font-size: 13px;
   }
-  #ad-sim .status-footer .bar {
+  #ad-sim .status-footer .sl-bar {
     color: var(--secondary);
     display: inline-flex;
     width: fit-content;
     align-items: center;
     gap: 8px;
-    padding: 8px 0 7px;
-    line-height: 1.5;
-    border-bottom: 2px solid var(--secondary);
+    padding: 6px 0 6px;
+    line-height: 1.6;
+    border-bottom: 1.5px solid rgba(255, 201, 0, 0.55);
     cursor: pointer;
+    transition: border-color 0.25s ease, opacity 0.25s ease;
+  }
+  #ad-sim .status-footer .sl-bar:hover {
+    border-bottom-color: var(--secondary);
   }
   #ad-sim .brand-logo {
     width: 15px;
@@ -956,7 +966,7 @@ export const LANDING_HTML = `<!doctype html>
           <span class="title-label">project-ads</span>
         </div>
 
-        <div class="chat-panel">
+        <div class="chat-panel" id="sim-panel">
           <div class="input-row"><span class="prompt">&gt;</span> how to setup payments in my app<span class="caret"></span></div>
 
           <!-- Surface 1: transient ad, only while thinking -->
@@ -989,7 +999,7 @@ export const LANDING_HTML = `<!doctype html>
 
         <!-- Surface 2: persistent status bar, never goes away -->
         <div class="status-footer">
-          <div class="bar" title="cmd + click to open">
+          <div class="sl-bar" title="cmd + click to open">
             <span class="brand-logo"></span>
             <a class="link brandname" href="https://stripe.com" target="_blank" rel="noopener">Stripe</a>
             <span>&middot; powering payments for great products</span>
@@ -1029,7 +1039,8 @@ export const LANDING_HTML = `<!doctype html>
   var body = document.getElementById('sim-response');
   var followup = document.getElementById('sim-followup');
   var typed = document.getElementById('sim-typed');
-  if (!ad || !gen || !body || !followup || !typed) return;
+  var panel = document.getElementById('sim-panel');
+  if (!ad || !gen || !body || !followup || !typed || !panel) return;
 
   var lines = body.querySelectorAll('.r-line');
   var FOLLOWUP = 'I want to go ahead with Stripe';
@@ -1037,7 +1048,7 @@ export const LANDING_HTML = `<!doctype html>
   function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 
   function reset() {
-    ad.classList.remove('reveal', 'fade');
+    ad.classList.remove('reveal', 'fade', 'gone');
     gen.classList.remove('show');
     body.classList.remove('rendering');
     followup.classList.remove('show');
@@ -1053,9 +1064,10 @@ export const LANDING_HTML = `<!doctype html>
   }
 
   async function runLoop() {
+    reset();
     while (true) {
-      reset();
-      await sleep(900);
+      panel.classList.remove('clearing');
+      await sleep(700);
 
       // surface 1: ad appears while Claude is thinking
       ad.classList.add('reveal');
@@ -1065,19 +1077,27 @@ export const LANDING_HTML = `<!doctype html>
 
       // answer streams in — the transient ad steps aside
       body.classList.add('rendering');
+      ad.classList.remove('reveal');   // drop the forwards-filled reveal so the fade can win
       ad.classList.add('fade');
       for (var i = 0; i < lines.length; i++) {
         lines[i].classList.add('shown');
         await sleep(260);
       }
       gen.classList.remove('show');
+      ad.classList.add('gone');   // transient line is done: reclaim its space
       await sleep(500);
 
       // user replies — status bar ad has been there the whole time
       followup.classList.add('show');
       await sleep(300);
       await typeText(FOLLOWUP, 45);
-      await sleep(3200);
+      await sleep(3400);
+
+      // fade the panel out, wipe state behind the fade, then start over
+      panel.classList.add('clearing');
+      await sleep(500);
+      reset();
+      await sleep(120);
     }
   }
 
