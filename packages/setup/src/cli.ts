@@ -34,7 +34,12 @@ const HEARD_FROM_OPTIONS = [
   'Other',
 ]
 
+const args = process.argv.slice(2)
+const isUpdate = args.includes('--update') || args.includes('--force')
+
 async function main() {
+  if (isUpdate) return updateHooks()
+
   console.log('\n📢  project-ads — earn credits on every Claude Code session\n')
 
   // Required
@@ -91,6 +96,30 @@ async function main() {
 
   console.log('\nAll set. Earn credits on every Claude Code session.')
   console.log(`\nYour dashboard: ${SERVER}/dashboard?token=${token}`)
+}
+
+// Recopies hook files onto an existing install. No re-registration —
+// config.json / publisher_token are left untouched.
+function updateHooks() {
+  console.log('\n📢  project-ads — updating hooks\n')
+
+  mkdirSync(ADS_DIR, { recursive: true })
+  copyFileSync(HOOK_SRC, HOOK)
+  console.log(`✓ ${HOOK}`)
+
+  mkdirSync(join(HOME, '.claude', 'hooks'), { recursive: true })
+  copyFileSync(SL_SRC, SL_HOOK)
+  console.log(`✓ ${SL_HOOK}`)
+
+  copyFileSync(TOKEN_SERVER_SRC, TOKEN_SERVER)
+  console.log(`✓ ${TOKEN_SERVER}`)
+
+  wireSettings()
+  console.log(`✓ ${SETTINGS}`)
+
+  installTokenServer()
+
+  console.log('\nHooks updated — no re-registration needed.')
 }
 
 function installTokenServer() {
