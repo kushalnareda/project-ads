@@ -649,9 +649,9 @@ describe('POST /v1/admin/campaign/:id/review', () => {
 })
 
 describe('GET /advertiser', () => {
-  it('serves the advertiser portal HTML', async () => {
+  it('redirects to mailto link', async () => {
     const res = await app.request('/advertiser')
-    expect(res.status).toBe(200)
-    expect(await res.text()).toContain('advertiser portal')
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe('mailto:kushalsinghnareda@gmail.com')
   })
 })
