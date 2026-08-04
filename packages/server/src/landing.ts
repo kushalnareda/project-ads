@@ -1005,7 +1005,6 @@ export const LANDING_HTML = `<!doctype html>
     <div>
       <a href="/dashboard">Publisher Dashboard</a>
       <a href="mailto:kushalsinghnareda@gmail.com">Advertiser Portal</a>
-      <a href="https://www.linkedin.com/in/kushal-singh-nareda-4a4890213/" target="_blank" rel="noopener noreferrer">LinkedIn</a>
     </div>
   </footer>
 
