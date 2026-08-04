@@ -5,6 +5,7 @@ export const LANDING_HTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>project-ads · make money while you code</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23111111' stroke='%23ffffff' stroke-width='1.5'/%3E%3Crect width='32' height='9' rx='0' fill='%23ffffff'/%3E%3Crect width='32' height='9' rx='0' fill='url(%23stripes)'/%3E%3Cdefs%3E%3Cpattern id='stripes' patternUnits='userSpaceOnUse' width='10' height='9' patternTransform='skewX(-20)'%3E%3Crect width='5' height='9' fill='%23000000'/%3E%3Crect x='5' width='5' height='9' fill='%23ffffff'/%3E%3C/pattern%3E%3C/defs%3E%3Ctext x='4' y='26' font-family='monospace' font-size='13' font-weight='bold' fill='%23F096E4'%3E%3E_%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
