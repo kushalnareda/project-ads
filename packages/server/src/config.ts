@@ -1,6 +1,11 @@
 function require(name: string): string {
   const val = process.env[name]
-  if (!val) throw new Error(`Missing env var: ${name}`)
+  if (!val) {
+    if (process.env.NODE_ENV === 'test' || !process.env.FLY_APP_NAME) {
+      return `mock_${name.toLowerCase()}`
+    }
+    throw new Error(`Missing env var: ${name}`)
+  }
   return val
 }
 

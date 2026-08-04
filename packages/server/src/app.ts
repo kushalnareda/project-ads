@@ -962,96 +962,437 @@ const DASHBOARD_HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>project-ads · earnings</title>
+<title>project-ads · publisher dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  :root { color-scheme: dark; }
-  * { margin: 0; box-sizing: border-box; }
-  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #0d1117; color: #e6edf3; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 48px 16px; }
-  h1 { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
-  .sub { color: #7d8590; font-size: 13px; margin-bottom: 32px; }
-  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 24px; width: 100%; max-width: 560px; }
-  input, select { width: 100%; padding: 10px 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; font: inherit; margin-bottom: 12px; }
-  button { width: 100%; padding: 10px; background: #238636; border: none; border-radius: 6px; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
-  button:hover { background: #2ea043; }
-  button:disabled { background: #21262d; color: #7d8590; cursor: default; }
-  .stats { display: none; }
-  .section-label { font-size: 11px; color: #7d8590; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .banner { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 12px; font-size: 13px; margin: 4px 0 20px; }
-  .banner.pending { border-color: #9e6a03; color: #e3b341; }
-  .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; }
-  .badge.pending { background: #3a2d0a; color: #e3b341; }
-  .badge.paid { background: #1a3a24; color: #3fb950; }
-  .badge.rejected { background: #3a1a1a; color: #f85149; }
-  .row { display: flex; gap: 12px; margin: 24px 0; }
-  .stat { flex: 1; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 16px; text-align: center; }
-  .stat .num { font-size: 24px; font-weight: 700; color: #3fb950; }
-  .stat .label { font-size: 11px; color: #7d8590; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 8px 4px; border-bottom: 1px solid #21262d; }
-  th { color: #7d8590; font-weight: 500; }
+  :root {
+    --primary: #F096E4;
+    --secondary: #FFC900;
+    --accent: #34A8A2;
+    --background: #09090b;
+    --surface: rgba(22, 22, 26, 0.7);
+    --border: rgba(255, 255, 255, 0.08);
+    --on-surface: #FFFFFF;
+    --on-surface-secondary: #a1a1aa;
+    --on-surface-muted: #71717a;
+    --input-background: rgba(255, 255, 255, 0.03);
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  body {
+    background-color: var(--background);
+    background-image: 
+      radial-gradient(circle at 15% 15%, rgba(240, 150, 228, 0.06) 0%, transparent 50%),
+      radial-gradient(circle at 85% 85%, rgba(52, 168, 162, 0.05) 0%, transparent 50%);
+    background-attachment: fixed;
+    color: var(--on-surface);
+    font-family: 'Inter', sans-serif;
+    padding: 80px 24px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .container {
+    width: 100%;
+    max-width: 600px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  /* Header Section */
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(18, 18, 22, 0.6);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-radius: 20px;
+    padding: 16px 24px;
+    width: 100%;
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+  }
+
+  .logo-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .clapboard {
+    width: 38px;
+    height: 38px;
+    border: 2px solid var(--on-surface);
+    background: #111;
+    border-radius: 6px;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 15px rgba(240, 150, 228, 0.15);
+  }
+
+  .clapboard-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 10px;
+    background: var(--on-surface);
+    background-image: repeating-linear-gradient(
+      -45deg,
+      #000,
+      #000 4px,
+      #fff 4px,
+      #fff 8px
+    );
+    border-bottom: 2px solid var(--on-surface);
+  }
+
+  .clapboard-term {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: bold;
+    color: var(--primary);
+    margin-top: 10px;
+  }
+
+  .logo-text {
+    font-family: 'Outfit', sans-serif;
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--primary);
+    letter-spacing: -0.5px;
+    background: linear-gradient(135deg, #FFF 30%, var(--primary) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  /* Card */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border-radius: 28px;
+    padding: 36px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    transition: var(--transition);
+  }
+
+  .card:hover {
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .title-area {
+    text-align: center;
+  }
+
+  .headline {
+    font-family: 'Outfit', sans-serif;
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--on-surface);
+    letter-spacing: -0.5px;
+  }
+
+  .sub {
+    font-size: 14px;
+    color: var(--on-surface-secondary);
+    margin-top: 6px;
+  }
+
+  .input {
+    width: 100%;
+    padding: 16px;
+    background: var(--input-background);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    color: var(--on-surface);
+    font-family: inherit;
+    font-size: 16px;
+    outline: none;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    transition: var(--transition);
+    margin-bottom: 12px;
+  }
+
+  .input:focus {
+    border-color: var(--primary);
+    background: rgba(255, 255, 255, 0.05);
+    box-shadow: 0 0 20px rgba(240, 150, 228, 0.15);
+  }
+
+  .btn {
+    width: 100%;
+    padding: 16px;
+    background: linear-gradient(135deg, #F096E4 0%, #d869cb 100%);
+    color: #000000;
+    font-size: 16px;
+    font-weight: 700;
+    border: none;
+    border-radius: 16px;
+    cursor: pointer;
+    box-shadow: 0 4px 20px rgba(240, 150, 228, 0.25);
+    transition: var(--transition);
+  }
+
+  .btn:hover {
+    transform: translateY(-1.5px);
+    box-shadow: 0 6px 24px rgba(240, 150, 228, 0.4);
+  }
+
+  .btn:active {
+    transform: translateY(0);
+  }
+
+  .btn:disabled {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--on-surface-muted);
+    border: 1px solid var(--border);
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+  }
+
+  @media (max-width: 480px) {
+    .row {
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+  }
+
+  .stat {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 20px 12px;
+    text-align: center;
+    transition: var(--transition);
+  }
+
+  .stat:hover {
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+
+  .stat .num {
+    font-family: 'Outfit', sans-serif;
+    font-size: 26px;
+    font-weight: 800;
+    margin-bottom: 4px;
+    letter-spacing: -0.5px;
+  }
+
+  .stat .label {
+    font-size: 10px;
+    color: var(--on-surface-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 700;
+  }
+
+  .section-label {
+    font-size: 12px;
+    color: var(--primary);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    font-weight: 700;
+    margin-bottom: 12px;
+  }
+
+  .banner {
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px;
+    font-size: 14px;
+    margin-bottom: 16px;
+    line-height: 1.5;
+  }
+
+  .banner.pending {
+    border-color: var(--secondary);
+    color: var(--secondary);
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 99px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .badge.pending { background: rgba(255, 201, 0, 0.1); color: var(--secondary); border: 1px solid rgba(255, 201, 0, 0.2); }
+  .badge.paid { background: rgba(63, 185, 80, 0.1); color: #3fb950; border: 1px solid rgba(63, 185, 80, 0.2); }
+  .badge.rejected { background: rgba(248, 81, 73, 0.1); color: #f85149; border: 1px solid rgba(248, 81, 73, 0.2); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 12px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  th {
+    color: var(--on-surface-secondary);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+  }
+
   td.r, th.r { text-align: right; }
-  .err { color: #f85149; font-size: 13px; margin-top: 8px; display: none; }
+
+  .err {
+    color: #f85149;
+    font-size: 14px;
+    margin-top: 8px;
+    display: none;
+    font-family: var(--mono);
+    text-align: center;
+  }
+
+  .dashboard-links {
+    display: flex;
+    justify-content: flex-end;
+    gap: 20px;
+    margin-top: 8px;
+  }
+
+  .dashboard-links a {
+    color: var(--on-surface-muted);
+    text-decoration: none;
+    font-size: 13px;
+    transition: var(--transition);
+  }
+
+  .dashboard-links a:hover {
+    color: var(--on-surface);
+  }
 </style>
 </head>
 <body>
-<h1>📢 project-ads</h1>
-<div class="sub" id="sub">publisher earnings</div>
-<div class="card">
-  <div id="login">
-    <input id="token" type="password" placeholder="publisher token (from ~/.project-ads/config.json)">
-    <button onclick="load()">View earnings</button>
-    <div class="err" id="err"></div>
-  </div>
-  <div class="stats" id="stats">
-    <div class="row">
-      <div class="stat"><div class="num" id="credits">–</div><div class="label">earned (usd)</div></div>
-      <div class="stat"><div class="num" id="unpaid">–</div><div class="label">unpaid balance</div></div>
-      <div class="stat"><div class="num" id="impressions">–</div><div class="label">impressions</div></div>
-    </div>
-    <div id="payhint" style="font-size:12px;color:#7d8590;margin:-12px 0 20px;text-align:center"></div>
 
-    <div id="cashoutWrap" style="display:none;margin-bottom:24px">
-      <div class="section-label">cash out</div>
-      <div id="cashoutBanner" class="banner" style="display:none"></div>
-      <div id="cashoutForm" style="display:none">
-        <select id="co_method">
-          <option value="paypal">PayPal</option>
-          <option value="bank">Bank transfer</option>
-          <option value="wise">Wise</option>
-          <option value="other">Other</option>
-        </select>
-        <input id="co_dest" placeholder="PayPal email / bank details / etc.">
-        <button id="co_submit" onclick="requestPayout()">Request payout</button>
-        <div class="err" id="co_err"></div>
+<div class="container">
+  
+  <header>
+    <div class="logo-group">
+      <div class="clapboard">
+        <div class="clapboard-bar"></div>
+        <div class="clapboard-term">&gt;_</div>
       </div>
-      <button id="cashoutBtn" onclick="showCashout()">Cash out</button>
+      <div class="logo-text">project-ads</div>
+    </div>
+  </header>
+
+  <div class="card">
+    <div class="title-area">
+      <h2 class="headline">Publisher Dashboard</h2>
+      <div class="sub" id="sub">view terminal earnings ledger</div>
     </div>
 
-    <table>
-      <thead><tr><th>day</th><th class="r">impressions</th><th class="r">credits</th></tr></thead>
-      <tbody id="days"></tbody>
-    </table>
+    <div id="login">
+      <input id="token" type="password" placeholder="publisher token (from ~/.project-ads/config.json)" class="input">
+      <button onclick="load()" class="btn">View earnings</button>
+      <div class="err" id="err"></div>
+    </div>
 
-    <div id="requestsWrap" style="display:none;margin-top:20px">
-      <div class="section-label">payout requests</div>
+    <div class="stats" id="stats">
+      <div class="row">
+        <div class="stat">
+          <div class="num" id="credits" style="color: var(--primary);">–</div>
+          <div class="label">earned (usd)</div>
+        </div>
+        <div class="stat">
+          <div class="num" id="unpaid" style="color: var(--secondary);">–</div>
+          <div class="label">unpaid balance</div>
+        </div>
+        <div class="stat">
+          <div class="num" id="impressions" style="color: var(--accent);">–</div>
+          <div class="label">impressions</div>
+        </div>
+      </div>
+      
+      <div id="payhint" style="font-size:13px;color:var(--on-surface-secondary);margin:16px 0 20px;text-align:center"></div>
+
+      <div id="cashoutWrap" style="display:none;margin-bottom:24px">
+        <div class="section-label">cash out</div>
+        <div id="cashoutBanner" class="banner" style="display:none"></div>
+        
+        <div id="cashoutForm" style="display:none">
+          <select id="co_method" class="input" style="margin-bottom:12px;">
+            <option value="paypal">PayPal</option>
+            <option value="bank">Bank transfer</option>
+            <option value="wise">Wise</option>
+            <option value="other">Other</option>
+          </select>
+          <input id="co_dest" placeholder="PayPal email / bank details / etc." class="input">
+          <button id="co_submit" onclick="requestPayout()" class="btn">Request payout</button>
+          <div class="err" id="co_err"></div>
+        </div>
+        <button id="cashoutBtn" onclick="showCashout()" class="btn">Cash out</button>
+      </div>
+
       <table>
-        <thead><tr><th>date</th><th>method</th><th class="r">amount</th><th class="r">status</th></tr></thead>
-        <tbody id="requests"></tbody>
+        <thead><tr><th>day</th><th class="r">impressions</th><th class="r">credits</th></tr></thead>
+        <tbody id="days"></tbody>
       </table>
-    </div>
 
-    <div id="payoutsWrap" style="display:none;margin-top:20px">
-      <div style="font-size:12px;color:#7d8590;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">payouts</div>
-      <table>
-        <thead><tr><th>date</th><th>method</th><th class="r">amount</th></tr></thead>
-        <tbody id="payouts"></tbody>
-      </table>
-    </div>
-    <div style="margin-top:16px;font-size:12px;color:#7d8590;text-align:right">
-      <a href="#" onclick="load(localStorage.getItem('pa_token'));return false" style="color:#58a6ff;margin-right:12px">refresh</a>
-      <a href="#" onclick="logout();return false" style="color:#7d8590">sign out</a>
+      <div id="requestsWrap" style="display:none;margin-top:20px">
+        <div class="section-label">payout requests</div>
+        <table>
+          <thead><tr><th>date</th><th>method</th><th class="r">amount</th><th class="r">status</th></tr></thead>
+          <tbody id="requests"></tbody>
+        </table>
+      </div>
+
+      <div id="payoutsWrap" style="display:none;margin-top:20px">
+        <div class="section-label">payouts</div>
+        <table>
+          <thead><tr><th>date</th><th>method</th><th class="r">amount</th></tr></thead>
+          <tbody id="payouts"></tbody>
+        </table>
+      </div>
+      
+      <div class="dashboard-links">
+        <a href="#" onclick="load(localStorage.getItem('pa_token'));return false">Refresh</a>
+        <a href="#" onclick="logout();return false">Sign out</a>
+      </div>
     </div>
   </div>
+  
 </div>
 <script>
 const $ = id => document.getElementById(id)
