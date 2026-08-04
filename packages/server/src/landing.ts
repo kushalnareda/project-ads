@@ -858,7 +858,7 @@ export const LANDING_HTML = `<!doctype html>
       </a>
       
       <!-- LinkedIn Link -->
-      <a href="#" class="header-link" aria-label="LinkedIn">
+      <a href="https://www.linkedin.com/in/kushal-singh-nareda-4a4890213/" class="header-link" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn">
         <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg>
       </a>
     </div>
@@ -874,7 +874,7 @@ export const LANDING_HTML = `<!doctype html>
     </div>
     
     <div style="margin-top: 12px; width: 100%; display: flex; justify-content: center;">
-      <button class="btn" id="submit-btn" onclick="advertisePrompt()" style="padding: 16px 32px; font-size: 16px; border-radius: 12px; font-weight: 600; cursor: pointer; transition: var(--transition);">Click here if you want to advertise</button>
+      <a href="https://docs.google.com/forms/d/18wXj_51yYtJ7Gp-M9TDqR0FC6yMpiGKtySLwT8jIhBI/edit" target="_blank" rel="noopener noreferrer" class="btn" id="submit-btn" style="display: inline-block; width: auto; text-decoration: none; padding: 16px 32px; font-size: 16px; border-radius: 12px; font-weight: 600; cursor: pointer; transition: var(--transition);">Click here if you want to advertise</a>
     </div>
   </div>
 
