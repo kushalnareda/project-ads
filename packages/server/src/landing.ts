@@ -39,7 +39,7 @@ export const LANDING_HTML = `<!doctype html>
     background-attachment: fixed;
     color: var(--on-surface);
     font-family: 'Inter', sans-serif;
-    padding: 80px 24px;
+    padding: 60px 16px;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
@@ -55,6 +55,15 @@ export const LANDING_HTML = `<!doctype html>
     gap: 40px;
   }
 
+  @media (max-width: 480px) {
+    body {
+      padding: 20px 12px;
+    }
+    .container {
+      gap: 20px;
+    }
+  }
+
   /* Header Section - Glassmorphic bar */
   header {
     display: flex;
@@ -68,6 +77,23 @@ export const LANDING_HTML = `<!doctype html>
     padding: 16px 28px;
     width: 100%;
     box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+  }
+
+  @media (max-width: 480px) {
+    header {
+      padding: 12px 16px;
+      border-radius: 16px;
+    }
+    .logo-text {
+      font-size: 18px;
+    }
+    .clapboard {
+      width: 32px;
+      height: 32px;
+    }
+    .header-actions a.btn-outline {
+      display: none;
+    }
   }
 
   .logo-group {
@@ -164,6 +190,16 @@ export const LANDING_HTML = `<!doctype html>
     background: linear-gradient(135deg, #FFFFFF 40%, #a1a1aa 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
+  }
+
+  @media (max-width: 640px) {
+    .headline { font-size: 38px; letter-spacing: -1px; }
+    .desc { font-size: 15px; }
+  }
+
+  @media (max-width: 480px) {
+    .headline { font-size: 30px; letter-spacing: -0.5px; }
+    .unboxed-hero { padding: 16px 0 8px; gap: 16px; }
   }
 
   .headline span {
@@ -305,6 +341,17 @@ export const LANDING_HTML = `<!doctype html>
   @media (max-width: 768px) {
     .card.full-row {
       grid-column: span 1;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .card {
+      padding: 20px 16px;
+      border-radius: 20px;
+      gap: 16px;
+    }
+    .card:hover {
+      transform: none;
     }
   }
 
@@ -839,7 +886,6 @@ export const LANDING_HTML = `<!doctype html>
     transition: all 0.2s ease;
     pointer-events: none;
     border: 1px solid rgba(100, 160, 255, 0.3);
->>>>>>> origin/main
   }
 
   @keyframes rotate {
@@ -954,6 +1000,7 @@ export const LANDING_HTML = `<!doctype html>
   footer {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     font-size: 13px;
     color: var(--on-surface-muted);
     border-top: 1px solid var(--border);
@@ -971,6 +1018,17 @@ export const LANDING_HTML = `<!doctype html>
 
   footer a:hover {
     color: var(--on-surface);
+  }
+
+  @media (max-width: 540px) {
+    footer {
+      flex-direction: column;
+      gap: 12px;
+      text-align: center;
+    }
+    footer a {
+      margin-left: 8px;
+    }
   }
 </style>
 </head>
@@ -1059,7 +1117,7 @@ export const LANDING_HTML = `<!doctype html>
       <div class="cli-card-inner">
         <div class="cli-card-info">
           <div class="lbl">Setup CLI Integration</div>
-          <p class="desc" style="font-size: 14px; color: var(--on-surface-secondary); margin-top: 8px; white-space: nowrap;">Run in your project directory to link hooks automatically.</p>
+          <p class="desc" style="font-size: 14px; color: var(--on-surface-secondary); margin-top: 8px;">Run in your project directory to link hooks automatically.</p>
         </div>
         <div class="cli-card-cmd">
           <div class="code-container">
