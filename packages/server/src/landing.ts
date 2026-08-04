@@ -11,7 +11,7 @@ export const LANDING_HTML = `<!doctype html>
 <style>
   :root {
     --primary: #F096E4;
-    --secondary: #FFC900;
+    --secondary: #F45BB5;
     --accent: #34A8A2;
     --background: #09090b;
     --surface: rgba(22, 22, 26, 0.7);
@@ -391,8 +391,8 @@ export const LANDING_HTML = `<!doctype html>
   .fill {
     width: 0%;
     height: 100%;
-    background: linear-gradient(90deg, var(--secondary) 0%, #ff8c00 100%);
-    box-shadow: 0 0 10px rgba(255, 201, 0, 0.4);
+    background: linear-gradient(90deg, var(--secondary) 0%, #ff4fa3 100%);
+    box-shadow: 0 0 10px rgba(244, 91, 181, 0.4);
     border-radius: 99px;
     transition: width 1.8s cubic-bezier(0.16, 1, 0.3, 1);
   }
@@ -711,6 +711,135 @@ export const LANDING_HTML = `<!doctype html>
     align-items: center;
     flex-wrap: wrap;
     gap: 4px 10px;
+    align-items: center;
+    gap: 8px;
+    color: var(--on-surface-muted);
+    font-size: 13px;
+  }
+
+  .c-spinner {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    font-size: 14px;
+    font-weight: 900;
+    color: var(--primary);
+    animation: spin-c 2s steps(4, end) infinite;
+    flex-shrink: 0;
+  }
+
+  @keyframes spin-c {
+    0%   { content: 'C'; opacity: 1; }
+    25%  { opacity: 0.4; }
+    50%  { opacity: 1; }
+    75%  { opacity: 0.4; }
+    100% { opacity: 1; }
+  }
+
+  .spinner-ad-line {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    font-size: 13px;
+    color: var(--on-surface-secondary);
+    border-left: 2px solid var(--primary);
+    padding-left: 14px;
+    margin-top: 4px;
+    opacity: 0;
+    animation: fadeInLine 0.6s ease forwards;
+    animation-delay: 1.2s;
+  }
+
+  @keyframes fadeInLine {
+    to { opacity: 1; }
+  }
+
+  /* ── Surface 2: Persistent statusline ad (always visible bottom bar) ── */
+  .statusline-box {
+    background: #1a1a1f;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    overflow: hidden;
+    font-family: var(--mono);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+    position: relative;
+  }
+
+  .statusline-chat {
+    padding: 16px 20px 10px;
+    font-size: 13px;
+    color: var(--on-surface-secondary);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+  }
+
+  .statusline-prompt-arrow {
+    color: #888;
+    font-size: 16px;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .statusline-bar {
+    padding: 6px 20px;
+    font-size: 12.5px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--secondary);
+    background: rgba(0,0,0,0.3);
+    border-top: 1px solid rgba(255,255,255,0.04);
+    position: relative;
+    cursor: pointer;
+  }
+
+  .statusline-bar:hover .statusline-tooltip {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .statusline-icon {
+    font-size: 10px;
+    background: rgba(255, 201, 0, 0.15);
+    border: 1px solid rgba(255, 201, 0, 0.2);
+    color: var(--secondary);
+    border-radius: 3px;
+    padding: 1px 4px;
+    letter-spacing: 0.5px;
+  }
+
+  .statusline-dot {
+    color: var(--on-surface-muted);
+    margin: 0 2px;
+  }
+
+  .statusline-mode {
+    color: var(--accent);
+    margin-left: auto;
+    font-size: 12px;
+    opacity: 0.8;
+  }
+
+  .statusline-tooltip {
+    position: absolute;
+    bottom: calc(100% + 4px);
+    left: 16px;
+    background: #2d5ca0;
+    color: #7ab3f5;
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 12.5px;
+    white-space: nowrap;
+    opacity: 0;
+    transform: translateY(4px);
+    transition: all 0.2s ease;
+    pointer-events: none;
+    border: 1px solid rgba(100, 160, 255, 0.3);
+>>>>>>> origin/main
   }
 
   @keyframes rotate {

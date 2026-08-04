@@ -146,6 +146,110 @@ describe('POST /v1/impression', () => {
   })
 })
 
+describe('POST /v1/impression/confirm', () => {
+  const CID = 'bbbbbbbb-0000-4000-8000-000000000001'
+
+  // Seeds one campaign; overrides let a test make it unservable.
+  function seed(over: Record<string, unknown> = {}) {
+    const campaign = {
+      id: CID, advertiser_name: 'Acme', ad_text: 'Acme · ship faster',
+      url: 'https://acme.example', budget_cents: 10_000, spent_cents: 0,
+      cpm_cents: 500, active: true, status: 'active',
+      starts_at: '2020-01-01T00:00:00Z', ends_at: '2030-01-01T00:00:00Z',
+      created_at: '', ...over,
+    }
+    __send.mockImplementation(async (cmd: any) => {
+      if (cmd.__type === 'List') return { Contents: [{ Key: `campaigns/${CID}.json` }] }
+      if (cmd.__type === 'Get' && cmd.input.Key.startsWith('campaigns/')) {
+        return { Body: { transformToString: async () => JSON.stringify(campaign) } }
+      }
+      return {}
+    })
+    return campaign
+  }
+
+  const confirm = (body: Record<string, unknown> = {}) =>
+    req('/v1/impression/confirm', {
+      campaign_id: CID, surface: 'claude-code-spinner', sdk_version: '0.1.0', ...body,
+    })
+
+  it('bills the named campaign at the spinner rate', async () => {
+    seed()
+    const res = await confirm({ publisher_token: TOKEN })
+    expect(res.status).toBe(200)
+    // 500 cpm_cents → 0.005 cents per impression → * 0.70 share * 1.0 spinner
+    expect((await res.json()).credits_delta).toBeCloseTo(0.0035, 10)
+  })
+
+  it('bills the campaign the client named, not the current auction winner', async () => {
+    // A second, higher-CPM campaign exists. A confirm must not re-run the
+    // auction — the client is displaying the one it recorded earlier.
+    const mine = {
+      id: CID, advertiser_name: 'Acme', ad_text: 'Acme · ship faster',
+      url: 'https://acme.example', budget_cents: 10_000, spent_cents: 0,
+      cpm_cents: 500, active: true, status: 'active',
+      starts_at: '2020-01-01T00:00:00Z', ends_at: '2030-01-01T00:00:00Z', created_at: '',
+    }
+    const richer = { ...mine, id: 'bbbbbbbb-0000-4000-8000-000000000002', cpm_cents: 9000 }
+    __send.mockImplementation(async (cmd: any) => {
+      if (cmd.__type === 'List') {
+        return { Contents: [mine, richer].map(c => ({ Key: `campaigns/${c.id}.json` })) }
+      }
+      if (cmd.__type === 'Get' && cmd.input.Key.startsWith('campaigns/')) {
+        const c = [mine, richer].find(x => cmd.input.Key.includes(x.id))!
+        return { Body: { transformToString: async () => JSON.stringify(c) } }
+      }
+      return {}
+    })
+    const res = await confirm({ publisher_token: TOKEN })
+    expect(res.status).toBe(200)
+    // Still the 500-CPM rate, not the 9000-CPM campaign's.
+    expect((await res.json()).credits_delta).toBeCloseTo(0.0035, 10)
+  })
+
+  // The whole point of deferring: an ad staged before the advertiser stopped
+  // paying is still on the publisher's screen, but must not be charged for.
+  it.each([
+    ['paused', { status: 'paused' }],
+    ['over budget', { spent_cents: 10_000 }],
+    ['ended', { ends_at: '2020-06-01T00:00:00Z' }],
+    ['not yet started', { starts_at: '2099-01-01T00:00:00Z' }],
+  ])('does not bill a %s campaign', async (_label, over) => {
+    seed(over)
+    const res = await confirm({ publisher_token: TOKEN })
+    expect(res.status).toBe(204)
+  })
+
+  it('does not bill an unknown campaign', async () => {
+    seed()
+    const res = await confirm({ campaign_id: 'cccccccc-9999-4000-8000-000000000999' })
+    expect(res.status).toBe(204)
+  })
+
+  it('rejects a non-UUID campaign_id', async () => {
+    const res = await confirm({ campaign_id: '../../etc/passwd' })
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects a missing surface', async () => {
+    const res = await req('/v1/impression/confirm', { campaign_id: CID })
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects a non-UUID publisher_token', async () => {
+    const res = await confirm({ publisher_token: 'not-a-uuid' })
+    expect(res.status).toBe(400)
+  })
+
+  // Confirms spend real money, so they must not bypass the impression limit.
+  it('shares the impression rate limit', async () => {
+    seed()
+    let last: Response | undefined
+    for (let i = 0; i < 61; i++) last = await confirm({ publisher_token: TOKEN })
+    expect(last!.status).toBe(429)
+  })
+})
+
 describe('POST /v1/publisher/register', () => {
   it('rejects invalid email', async () => {
     const res = await req('/v1/publisher/register', { email: 'notanemail' })
@@ -649,9 +753,9 @@ describe('POST /v1/admin/campaign/:id/review', () => {
 })
 
 describe('GET /advertiser', () => {
-  it('serves the advertiser portal HTML', async () => {
+  it('redirects to mailto link', async () => {
     const res = await app.request('/advertiser')
-    expect(res.status).toBe(200)
-    expect(await res.text()).toContain('advertiser portal')
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe('mailto:kushalsinghnareda@gmail.com')
   })
 })

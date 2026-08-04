@@ -12,6 +12,9 @@ const LAST_IMP    = join(DIR, '.last-statusline-impression')
 const WALLET      = join(DIR, 'wallet.json')
 const CONFIG      = join(DIR, 'config.json')
 const AD_URL      = process.env.PROJECT_ADS_URL ?? 'https://project-ads.fly.dev/v1/impression'
+const SITE_URL    = 'https://project-ads.fly.dev'
+const PINK        = '\x1b[38;5;213m'
+const RESET       = '\x1b[0m'
 const CACHE_TTL   = 30_000
 const IDLE_MS     = 5 * 60 * 1000   // 5 min idle before logging impression
 const IMP_GATE_MS = 5 * 60 * 1000   // min gap between statusline impressions
@@ -30,7 +33,9 @@ try {
   if (output) process.stdout.write(output)
   else throw new Error('no frame')
 } catch {
-  process.stdout.write('📢 Ramp · save time on expenses')
+  process.stdout.write(
+    `\x1b]8;;${SITE_URL}\x1b\\${PINK}📢 Project Ads · reach devs in their terminal${RESET}\x1b]8;;\x1b\\`,
+  )
 }
 
 // Idle gate: only log impression if idle > 5 min

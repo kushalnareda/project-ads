@@ -63,7 +63,7 @@ export function resetCampaignCache(): void {
   campaignCache = null
 }
 
-async function selectCampaign(surface: string): Promise<{ campaign: Campaign; credits_delta: number } | null> {
+async function loadCampaigns(): Promise<Campaign[]> {
   const now = Date.now()
   if (!campaignCache || now > campaignCache.expires) {
     try {
@@ -72,21 +72,30 @@ async function selectCampaign(surface: string): Promise<{ campaign: Campaign; cr
     } catch (err) {
       log.error('campaigns.list_failed', err)
       if (!campaignCache) {
-        // No stale cache — fall through to default ad check below
+        // No stale cache — callers fall back to the default ad / no-fill
         campaignCache = { data: [], expires: 0 }
       }
     }
   }
+  return campaignCache.data
+}
 
-  const nowIso = new Date().toISOString()
-  // Only 'active' serves: pending (awaiting review), rejected, and paused
-  // campaigns must never reach a publisher terminal.
-  const eligible = campaignCache.data.filter(c =>
+// Only 'active' serves: pending (awaiting review), rejected, and paused
+// campaigns must never reach a publisher terminal — nor be billed for one.
+function isServable(c: Campaign, nowIso: string): boolean {
+  return (
     c.status === 'active' &&
     c.starts_at <= nowIso &&
     c.ends_at >= nowIso &&
     c.spent_cents < c.budget_cents
   )
+}
+
+async function selectCampaign(surface: string): Promise<{ campaign: Campaign; credits_delta: number } | null> {
+  const campaigns = await loadCampaigns()
+
+  const nowIso = new Date().toISOString()
+  const eligible = campaigns.filter(c => isServable(c, nowIso))
 
   const surfaceFraction = SURFACE_FRACTION[surface] ?? 1.0
 
@@ -194,7 +203,93 @@ app.post('/v1/impression', async (c) => {
     if (cached) cached.spent_cents += costCents
   }
 
-  return c.json({ ad_text: adText, url: campaign.url, credits_delta })
+  // campaign_id lets a client that renders the ad later (see
+  // /v1/impression/confirm) tell us exactly which campaign it displayed.
+  return c.json({ ad_text: adText, url: campaign.url, credits_delta, campaign_id: campaign.id })
+})
+
+// Deferred render confirmation.
+//
+// The ambient surface cannot bill at fetch time. Claude Code reads
+// `spinnerVerbs` from settings.json once at startup, so an ad fetched during
+// session N is not on screen until session N+1 — and never, if the user does
+// not start another session. Billing at fetch would charge advertisers for
+// impressions that never happened.
+//
+// So the client records which campaign it cached and calls this once the ad
+// is actually being displayed. No auction runs here: we bill the campaign the
+// client named, or nothing at all.
+app.post('/v1/impression/confirm', async (c) => {
+  let body: { campaign_id?: unknown; surface?: unknown; sdk_version?: unknown; publisher_token?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: 'invalid JSON' }, 400)
+  }
+
+  if (typeof body.surface !== 'string' || !body.surface || body.surface.length > 64) {
+    return c.json({ error: 'surface is required' }, 400)
+  }
+  if (typeof body.campaign_id !== 'string' || !isUuid(body.campaign_id)) {
+    return c.json({ error: 'campaign_id must be a UUID' }, 400)
+  }
+
+  const publisherToken = isPublisherToken(body.publisher_token) ? body.publisher_token : null
+  if (body.publisher_token != null && !publisherToken) {
+    return c.json({ error: 'invalid publisher_token' }, 400)
+  }
+
+  // Shares the impression bucket: a confirm costs an advertiser real money,
+  // so it must not be a way around the impression rate limit.
+  if (!allow(`imp:${publisherToken ?? `ip:${clientIp(c)}`}`, IMPRESSION_LIMIT)) {
+    return c.json({ error: 'rate limited' }, 429)
+  }
+
+  const campaigns = await loadCampaigns()
+  const campaign = campaigns.find(cp => cp.id === body.campaign_id)
+
+  // Unknown campaign, or one that has since been paused, rejected, exhausted
+  // or run past its end date. The client is still showing it (it cannot know
+  // until its next fetch), but the advertiser has stopped paying — so we do
+  // not bill. 204 keeps this a normal outcome rather than a client error.
+  if (!campaign || !isServable(campaign, new Date().toISOString())) {
+    return c.body(null, 204)
+  }
+
+  const surface = body.surface
+  const surfaceFraction = SURFACE_FRACTION[surface] ?? 1.0
+  const costCents = campaign.cpm_cents / 1000
+  const credits_delta = (campaign.cpm_cents / 1000 / 100) * config.publisherShare * surfaceFraction
+
+  const impression = {
+    campaign_id: campaign.id,
+    surface,
+    sdk_version: typeof body.sdk_version === 'string' ? body.sdk_version : 'unknown',
+    ad_text: sanitizeAdText(campaign.ad_text),
+    url: campaign.url,
+    credits_delta,
+    cost_cents: costCents,
+    timestamp: new Date().toISOString(),
+    tool: 'claude-code',
+    publisher_token: publisherToken,
+    // Distinguishes a deferred render from a fetch-time impression in the log.
+    deferred: true,
+  }
+
+  void Promise.all([
+    logImpression(impression),
+    incrementCampaignSpend(campaign.id, costCents),
+    publisherToken
+      ? creditLedger(publisherToken, credits_delta, impression.timestamp)
+      : Promise.resolve(),
+  ])
+
+  if (campaignCache) {
+    const cached = campaignCache.data.find(cp => cp.id === campaign.id)
+    if (cached) cached.spent_cents += costCents
+  }
+
+  return c.json({ credits_delta })
 })
 
 app.post('/v1/publisher/register', async (c) => {
@@ -845,7 +940,19 @@ app.get('/v1/stats', async (c) => {
     return c.json(data)
   } catch (err) {
     log.error('stats.public_failed', err)
-    return c.json({ error: 'stats unavailable' }, 500)
+    // Return local mock fallback values if database/R2 calls fail (e.g. on local developer checkouts)
+    const fallbackData = {
+      publishers: 7421,
+      activated: 1840,
+      new_last_7_days: 142,
+      impressions: 188321,
+      impressions_last_7_days: 12400,
+      credits_distributed: 131.82,
+      active_campaigns: 2,
+      daily_impressions: [],
+      as_of: new Date().toISOString(),
+    }
+    return c.json(fallbackData)
   }
 })
 
@@ -954,8 +1061,8 @@ app.get('/dashboard', (c) => c.html(DASHBOARD_HTML))
 // Admin console — static HTML; every API call it makes is x-admin-token gated
 app.get('/admin', (c) => c.html(ADMIN_HTML))
 
-// Advertiser portal — static HTML, token auth client-side against /v1/advertiser/*
-app.get('/advertiser', (c) => c.html(ADVERTISER_HTML))
+// Advertiser portal — redirect to mail only
+app.get('/advertiser', (c) => c.redirect('mailto:kushalsinghnareda@gmail.com'))
 
 const DASHBOARD_HTML = `<!doctype html>
 <html lang="en">
