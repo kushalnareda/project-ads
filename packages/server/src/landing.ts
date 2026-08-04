@@ -391,8 +391,8 @@ export const LANDING_HTML = `<!doctype html>
   .fill {
     width: 0%;
     height: 100%;
-    background: linear-gradient(90deg, var(--secondary) 0%, #ff4fa3 100%);
-    box-shadow: 0 0 10px rgba(244, 91, 181, 0.4);
+    background: linear-gradient(90deg, #FFC900 0%, #ffb300 100%);
+    box-shadow: 0 0 10px rgba(255, 201, 0, 0.4);
     border-radius: 99px;
     transition: width 1.8s cubic-bezier(0.16, 1, 0.3, 1);
   }
@@ -1010,12 +1010,12 @@ export const LANDING_HTML = `<!doctype html>
     <div>
       <h2 class="headline">Make money <span>while you code</span>.</h2>
       <p class="desc">
-        Get paid to wait for AI responses. We show a single-line sponsored tip in your terminal (Claude Code) status bar during code generation wait-states. <span style="color: var(--secondary); font-weight: 500;">Publishers keep 70% of CPM revenue.</span>
+        Get paid to wait for AI responses. We show a single-line sponsored tip in your terminal (Claude Code) status bar during code generation wait-states. <span style="color: #FFC900; font-weight: 500;">Publishers keep 70% of CPM revenue.</span>
       </p>
     </div>
     
     <div style="margin-top: 12px; width: 100%; display: flex; justify-content: center;">
-      <a href="https://docs.google.com/forms/d/18wXj_51yYtJ7Gp-M9TDqR0FC6yMpiGKtySLwT8jIhBI/edit" target="_blank" rel="noopener noreferrer" class="btn" id="submit-btn" style="display: inline-block; width: auto; text-decoration: none; padding: 16px 32px; font-size: 16px; border-radius: 12px; font-weight: 600; cursor: pointer; transition: var(--transition);">Click here if you want to advertise</a>
+      <a href="https://docs.google.com/forms/d/e/1FAIpQLScr30DjzelaomTnlOa50VQuBNKJYpxhsCSdzEiWQ59_zSKnrg/viewform?usp=dialog" target="_blank" rel="noopener noreferrer" class="btn" id="submit-btn" style="display: inline-block; width: auto; text-decoration: none; padding: 16px 32px; font-size: 16px; border-radius: 12px; font-weight: 600; cursor: pointer; transition: var(--transition);">Click here if you want to advertise</a>
     </div>
   </div>
 
@@ -1033,7 +1033,7 @@ export const LANDING_HTML = `<!doctype html>
         </div>
         <div class="launch-divider"></div>
         <div class="launch-stat">
-          <div class="launch-num" id="launch-pct" style="color: var(--secondary);">0.0%</div>
+          <div class="launch-num" id="launch-pct" style="color: #FFC900;">0.0%</div>
           <div class="launch-label">To Launch Goal</div>
         </div>
         <div class="launch-divider"></div>
@@ -1254,7 +1254,7 @@ async function fetchStats() {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     var d = await r.json();
     
-    publishersCount = d.publishers || publishersCount;
+    publishersCount = (d.publishers !== undefined && d.publishers !== null) ? d.publishers : publishersCount;
     updateProgress(publishersCount);
   } catch (e) {
     updateProgress(publishersCount);
